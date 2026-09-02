@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>爬坡 Ramp · 新人工作台</title>
+<link rel="stylesheet" href="/_shared.css">
+</head>
+<body>
+<div class="page">
+  <div class="head2">
+    <div><h2 id="nb-title">加载中…</h2><div class="sub" id="nb-sub"></div></div>
+    <div class="vm"><span>本次会话 <b id="c-turn">0</b> 轮</span><span>累计成本 <b id="c-cost">¥0.0000</b></span><span>路径 <b id="c-route">—</b></span></div>
+  </div>
+  <div class="shell">
+    <div class="chatwrap">
+      <div>
+        <div class="stream" id="stream"></div>
+        <div class="ask">
+          <div class="askrow">
+            <input id="q" placeholder="问点什么…（真实调用后端，会花钱）" autocomplete="off">
+            <button class="btn pri" id="send">发送</button>
+          </div>
+          <div class="chips" id="chips">
+            <button class="chip" data-q="试用期多久？转正要交什么材料？"><i>L0</i>试用期与转正材料</button>
+            <button class="chip" data-q="我的社保开始交了吗？"><i>L1</i>我的社保交了吗</button>
+            <button class="chip" data-q="我要申请生产库的只读权限"><i>L3</i>申请生产库只读权限</button>
+            <button class="chip" data-q="接口联调应该找谁？"><i>升级</i>接口联调找谁</button>
+            <button class="chip dg" data-q="隔壁组张三工资多少？"><i>H3</i>隔壁组张三工资多少</button>
+          </div>
+        </div>
+      </div>
+      <div class="rail">
+        <div class="w"><div class="wl">我的 30 天</div><div class="tl" id="tl"></div></div>
+        <div class="w"><div class="wl">Ramp 记得关于我的</div><div class="memo" id="memo"></div>
+          <p class="priv" id="privnote"></p></div>
+      </div>
+    </div>
+  </div>
+  <footer style="padding:16px 0 0">这一页只有你自己能看到。Mentor 和 HR 拿到的是<b>主题聚合</b>，
+    不是这里的聊天记录——那不是权限没配好，是产品设计。</footer>
+</div>
+
+<div class="back" id="back" role="dialog" aria-modal="true"><div class="modal">
+  <div class="mh"><b>执行前确认 · H2</b><p>Ramp 将代你在外部系统写入以下内容</p></div>
+  <div class="mb" id="m-fields"></div>
+  <div class="mf"><span class="hint" style="margin-right:auto">提交后有 5 分钟撤回窗口</span>
+    <button class="btn" id="m-no">取消</button><button class="btn pri" id="m-ok">确认提交</button></div>
+</div></div>
+
+<script src="/_shared.js"></script>
+<script>
+let ME = null, EMP = null, sid = null, turns = 0, cost = 0;
+
+function bubble(r) {
+  const bd = [];
+  const routeMap = { blocked: ['b-block', '拦截 · ' + (r.rule_id || 'H3')], escalate: ['b-esc', '未命中 · 已升级'],
+    act: ['b-auto', 'Agent 循环 · 工具'], advice: ['b-auto', '建议 · 绕开阈值'], answer: ['b-auto', '检索作答'] };
+  const rm = routeMap[r.route] || ['b-auto', r.route || ''];
+  bd.push('<span class="bg ' + rm[0] + '">' + esc(rm[1]) + '</span>');
+  if (r.kind) bd.push('<span class="bg b-cost">kind=' + esc(r.kind) + '</span>');
+  if (r.tools && r.tools.length) bd.push('<span class="bg b-cost">' + esc(r.tools.join(' · ')) + '</span>');
+  bd.push('<span class="bg b-cost">' + money(r.cost) + (r.best_score ? ' · 检索 ' + r.best_score : '') + '</span>');
+  let h = '<div class="msg ai"><div class="av">R</div><div class="bub"><div class="badges">' + bd.join('') + '</div>';
+  h += '<div class="said">' + esc(r.answer || '（空）') + '</div>';
+  if (r.citations) h += '<div class="cite">' + esc(r.citations) + '</div>';
+  if (r.escalation_id) h += '<div class="cite">已生成升级卡片 #' + r.escalation_id + ' → Mentor 会看到</div>';
+  return h + '</div></div>';
+}
+
+async function ask(text) {
+  if (!text.trim()) return;
+  $('#send').disabled = true; $('#q').value = '';
+  const initial = esc((ME.display_name || '我').slice(0, 1));
+  $('#stream').appendChild(el('<div class="msg me"><div class="av">' + initial +
+    '</div><div class="bub"><div class="said">' + esc(text) + '</div></div></div>'));
+  const wait = el('<div class="msg ai"><div class="av">R</div><div class="bub"><div class="said"><span class="spin"></span> 思考中…</div></div></div>');
+  $('#stream').appendChild(wait); $('#stream').scrollTop = 1e9;
+  try {
+    const r = await api('/newbie/ask', j('POST', { question: text, employee_id: EMP, session_id: sid }));
+    sid = r.session_id; turns++; cost += r.cost || 0;
+    $('#c-turn').textContent = turns;
+    $('#c-cost').textContent = money(cost);
+    $('#c-route').textContent = r.route || '—';
+    wait.replaceWith(el(bubble(r)));
+    if (r.pending_action) showConfirm(r.pending_action);
+    if (r.escalation_id) toast('已生成升级卡片 #' + r.escalation_id);
+    loadMemory();
+  } catch (e) {
+    wait.querySelector('.said').innerHTML = '<span class="err">请求失败：' + esc(e.message) + '</span>';
+  }
+  $('#send').disabled = false;
+  $('#stream').scrollTop = 1e9;
+}
+
+function showConfirm(p) {
+  const f = (p.preview && p.preview.fields) || {};
+  $('#m-fields').innerHTML = Object.entries(f).map(function (kv) {
+    return '<div class="fld"><i>' + esc(kv[0]) + '</i><u>' + esc(kv[1]) + '</u></div>';
+  }).join('') || '<div class="fld"><i>工具</i><u>' + esc(p.tool || '') + '</u></div>';
+  $('#back').classList.add('on');
+}
+
+async function resume(ok) {
+  $('#back').classList.remove('on');
+  const wait = el('<div class="msg ai"><div class="av">R</div><div class="bub"><div class="said"><span class="spin"></span> 提交中…</div></div></div>');
+  $('#stream').appendChild(wait);
+  try {
+    const r = await api('/newbie/confirm', j('POST', { session_id: sid, confirmed: ok, employee_id: EMP }));
+    cost += r.cost || 0; $('#c-cost').textContent = money(cost);
+    wait.replaceWith(el(bubble(r))); toast(ok ? '已提交' : '已取消');
+  } catch (e) {
+    wait.querySelector('.said').innerHTML = '<span class="err">' + esc(e.message) + '</span>';
+  }
+}
+
+async function loadMemory() {
+  try {
+    const m = await api('/newbie/' + EMP + '/memory');
+    const all = m.raw_questions || [], rows = all.slice(0, 8);
+    let h = rows.map(function (r) {
+      const kind = r.kind === 'semantic' ? '语义' : r.kind === 'procedural' ? '程序' : '情景';
+      return '<div class="r"><span>' + kind + '</span>' +
+        '<span style="flex:1;color:var(--ink2);font-family:inherit;font-size:11.5px">' +
+        esc(r.content).slice(0, 40) + '</span>' +
+        '<button data-del="' + r.id + '">删除</button></div>';
+    }).join('');
+    if (all.length > rows.length) {
+      h += '<div class="r"><span style="flex:1;font-family:inherit;font-size:11px;color:var(--ink3)">…共 ' +
+        all.length + ' 条，仅显示最近 8 条</span></div>';
+    }
+    $('#memo').innerHTML = h || '<div class="r">（暂无）</div>';
+    $('#privnote').innerHTML = '<b>' + esc(m.note || '只有你能看到这一栏。') +
+      '</b> 情景记忆 30 天后自动降解为主题聚合。';
+  } catch (e) {
+    $('#memo').innerHTML = '<div class="r"><span class="err">' + esc(e.message) + '</span></div>';
+  }
+}
+
+async function loadTimeline() {
+  try {
+    const t = await api('/newbie/' + EMP + '/timeline');
+    $('#tl').innerHTML = t.map(function (d) {
+      return '<div class="d ' + d.state + '"><i>D' + String(d.day).padStart(2, '0') +
+        '</i><u>' + esc(d.title) + '</u></div>';
+    }).join('');
+  } catch (e) {}
+}
+
+$('#send').onclick = function () { ask($('#q').value); };
+$('#q').onkeydown = function (e) { if (e.key === 'Enter') ask($('#q').value); };
+$('#chips').onclick = function (e) { const b = e.target.closest('[data-q]'); if (b) ask(b.dataset.q); };
+$('#m-ok').onclick = function () { resume(true); };
+$('#m-no').onclick = function () { resume(false); };
+$('#back').onclick = function (e) { if (e.target === $('#back')) resume(false); };
+document.onkeydown = function (e) {
+  if (e.key === 'Escape' && $('#back').classList.contains('on')) resume(false);
+};
+$('#memo').onclick = async function (e) {
+  const b = e.target.closest('[data-del]'); if (!b) return;
+  try {
+    await api('/newbie/' + EMP + '/memory/' + b.dataset.del, { method: 'DELETE' });
+    toast('已从记忆中移除'); loadMemory();
+  } catch (x) { toast(x.message); }
+};
+
+(async function () {
+  ME = await mount('/newbie'); if (!ME) return;
+  EMP = ME.employee_id;
+  if (!EMP) {
+    $('#nb-title').textContent = '这个账号还没绑定员工档案';
+    $('#nb-sub').innerHTML = '请管理员在后台把 <code>employee_id</code> 填上——没有档案就没有入职进度、没有记忆，也没法提问。';
+    $('#send').disabled = true; $('#q').disabled = true;
+    return;
+  }
+  try {
+    const p = await api('/newbie/' + EMP + '/profile');
+    $('#nb-title').textContent = p.name + ' · ' + p.team + ' ' + p.role + ' · 入职第 ' + p.day + ' 天';
+    $('#nb-sub').textContent = 'Mentor ' + (p.mentor_name || '未分配') +
+      ' · 节点 ' + p.nodes_done + '/' + p.nodes_total;
+  } catch (e) { $('#nb-title').textContent = ME.display_name; }
+  loadTimeline(); loadMemory();
+  const p = await api('/newbie/' + EMP + '/push').catch(function () { return null; });
+  $('#stream').appendChild(el(
+    (p && !p.skipped && p.content)
+      ? '<div class="msg ai"><div class="av">R</div><div class="bub"><div class="badges">' +
+        '<span class="bg b-conf">主动推送 · Day ' + (p.day || '') + ' · L4</span></div><div class="said">' +
+        esc(p.content) + '</div></div></div>'
+      : '<div class="msg ai"><div class="av">R</div><div class="bub"><div class="badges">' +
+        '<span class="bg b-cost">打扰预算</span></div><div class="said">' +
+        esc(p && p.reason ? p.reason + '——所以今天不打扰你。' : '今天没有需要主动推送的节点。') +
+        '</div></div></div>'));
+})();
+</script>
+</body>
+</html>

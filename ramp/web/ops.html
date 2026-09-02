@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>爬坡 Ramp · 运营与质量</title>
+<link rel="stylesheet" href="/_shared.css">
+</head>
+<body>
+<div class="page">
+  <div class="head2">
+    <div><h2>运营与质量控制台</h2><div class="sub">会话追踪 · 黄金集回归 · 上线红线 · 人工复核</div></div>
+    <div class="vm"><span>报告 <b id="op-file">–</b></span></div>
+  </div>
+
+  <div class="tabs" style="max-width:340px" role="tablist">
+    <button role="tab" aria-selected="true" data-pane="mon">监控与回归</button>
+    <button role="tab" aria-selected="false" data-pane="rv">人工复核 <span id="rv-badge"></span></button>
+  </div>
+
+  <!-- ---------------- 监控与回归 ---------------- -->
+  <div class="pane on" data-pane="mon"><div class="shell"><div class="pad grid g2">
+    <div>
+      <div class="pnl"><div class="pl"><span>最近会话</span><span>点一条看调用链</span></div>
+        <div class="tw" style="border:0"><table id="op-sess"></table></div></div>
+      <div class="pnl" style="margin-top:14px"><div class="pl"><span>调用链</span><span id="op-sid">选一条会话</span></div>
+        <div class="wf" id="op-wf"><p class="hint">从上面选一条会话。</p></div>
+        <div id="op-cost"></div></div>
+    </div>
+    <div>
+      <div class="pnl"><div class="pl"><span>黄金集回归</span><span id="op-when">–</span></div>
+        <div class="tw" style="border:0"><table id="op-eval"></table></div>
+        <div id="op-red"></div><div id="op-agree"></div></div>
+      <div class="pnl" style="margin-top:14px"><div class="pl"><span>红线规则</span><span>模型调用之前</span></div>
+        <div class="tw" style="border:0"><table id="op-gr"></table></div></div>
+    </div>
+  </div></div></div>
+
+  <!-- ---------------- 人工复核 ---------------- -->
+  <div class="pane" data-pane="rv"><div class="shell">
+    <div class="vh"><div><h2 style="font-size:14px;margin:0">人工复核 · 20% 抽样</h2>
+      <div class="sub">判的是「机器的判断对不对」，不是「回答好不好」</div></div>
+      <div class="vm"><span>进度 <b id="rv-prog">–</b></span><span>一致率 <b id="rv-agree">–</b></span></div></div>
+    <div class="pad">
+      <div class="note" style="margin-bottom:14px"><span class="nt">怎么判</span>
+        每条只回答一个问题：<b>机器说它「合格 / 不合格」，你同不同意？</b><br>
+        蓝框里是<b>回答所依据的全部知识条目</b>——回答里出现了框里没有的具体信息（数字、期限、人名、系统名），就是编造。<br>
+        同意点「同意机器」，不同意点「机器判错了」。两边不一致的条目会被记成分歧，
+        一致率就是这么算出来的。<b>一致率低不代表产品差，代表判分器不可信</b>——那更该修。
+      </div>
+      <div class="note" id="rv-sampling" style="margin-bottom:12px">
+        <span class="nt">抽样说明</span>
+        <span id="rv-note"></span><br><span id="rv-bycat"></span>
+      </div>
+      <div id="rv-list"></div>
+    </div>
+  </div></div>
+</div>
+
+<script src="/_shared.js"></script>
+<script>
+let ME = null, CRIT = {}, rvLoaded = false;
+
+$$('.tabs button').forEach(function (b) {
+  b.onclick = function () {
+    $$('.tabs button').forEach(function (x) { x.setAttribute('aria-selected', String(x === b)); });
+    $$('.pane').forEach(function (p) { p.classList.toggle('on', p.dataset.pane === b.dataset.pane); });
+    if (b.dataset.pane === 'rv' && !rvLoaded) { rvLoaded = true; loadReview(); }
+  };
+});
+
+/* ---------------- 监控 ---------------- */
+async function loadOps() {
+  try {
+    const s = await api('/ops/sessions?limit=10');
+    $('#op-sess').innerHTML = '<thead><tr><th>会话</th><th>轮</th><th>成本</th></tr></thead><tbody>' +
+      s.map(function (x) {
+        return '<tr style="cursor:pointer" data-sess="' + esc(x.id) + '"><td class="n">' + esc(x.id) +
+          '</td><td class="n">' + x.turns + '</td><td class="n">' + money(x.cost) + '</td></tr>';
+      }).join('') + '</tbody>';
+  } catch (e) {}
+  try {
+    const g = await api('/ops/guardrails');
+    $('#op-gr').innerHTML = '<thead><tr><th>规则</th><th>名称</th><th>转接</th></tr></thead><tbody>' +
+      g.map(function (r) {
+        return '<tr><td class="n">' + esc(r.id) + '</td><td>' + esc(r.name) + '</td><td>' + esc(r.referral) + '</td></tr>';
+      }).join('') + '</tbody>';
+  } catch (e) {}
+  try {
+    const r = await api('/ops/eval/latest');
+    $('#op-file').textContent = r._file || '—';
+    $('#op-when').textContent = (r.generated_at || '').slice(0, 16).replace('T', ' ');
+    const by = r.by_category || r.categories || {};
+    $('#op-eval').innerHTML = '<thead><tr><th>类别</th><th>条数</th><th>通过</th><th>通过率</th></tr></thead><tbody>' +
+      Object.entries(by).map(function (kv) {
+        const k = kv[0], v = kv[1], n = v.n != null ? v.n : v.total;
+        const col = v.passed === n ? 'var(--good)' : 'var(--warn)';
+        return '<tr><td>' + esc(k) + '</td><td class="n">' + n + '</td><td class="n">' + v.passed +
+          '</td><td class="n" style="color:' + col + '">' + (v.rate * 100).toFixed(1) + '%</td></tr>';
+      }).join('') +
+      '<tr><td><b>总体</b></td><td class="n">' + r.total + '</td><td class="n">' + r.passed +
+      '</td><td class="n"><b>' + (r.pass_rate * 100).toFixed(1) + '%</b></td></tr></tbody>';
+    const rl = r.redline || {};
+    $('#op-red').innerHTML = '<div class="redline ' + (rl.ok ? 'ok' : 'no') + '">上线红线 · 拒答正确率 ≥ ' +
+      ((rl.threshold || 0.98) * 100).toFixed(0) + '%<span>实测 ' + ((rl.actual || 0) * 100).toFixed(1) +
+      '% · ' + (rl.ok ? '通过' : '未通过') + '</span></div>';
+  } catch (e) { $('#op-eval').innerHTML = '<tbody><tr><td class="err">' + esc(e.message) + '</td></tr></tbody>'; }
+}
+
+async function loadTrace(id) {
+  $('#op-sid').textContent = id;
+  try {
+    const t = await api('/ops/trace/' + id);
+    const w = t.waterfall || [];
+    const max = Math.max.apply(null, [1].concat(w.map(function (x) { return x.ms || 0; })));
+    const sum = w.reduce(function (a, b) { return a + (b.ms || 0); }, 0);
+    let acc = 0;
+    $('#op-wf').innerHTML = w.map(function (x) {
+      const left = acc / Math.max(1, sum) * 100; acc += x.ms || 0;
+      const cls = !x.ok ? 'bad' : (x.model && x.model.indexOf('pro') >= 0 ? '' : 't2');
+      return '<div class="sp"><u>' + esc(x.span) + '</u><div class="tk"><b class="' + cls +
+        '" style="left:' + left + '%;width:' + Math.max(1, (x.ms || 0) / max * 40) + '%"></b></div><em>' +
+        x.ms + 'ms' + (x.cost ? ' · ' + money(x.cost) : '') + '</em></div>';
+    }).join('') || '<p class="hint">无记录</p>';
+    const c = t.total || {};
+    $('#op-cost').innerHTML = '<div class="note" style="margin-top:11px"><span class="nt">合计</span>耗时 ' +
+      (c.duration_ms || 0) + 'ms · 输入 ' + (c.tokens_in || 0) + ' / 输出 ' + (c.tokens_out || 0) +
+      ' token · 成本 <b>' + money(c.cost) + '</b></div>';
+  } catch (e) { $('#op-wf').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; }
+}
+
+$('#op-sess').onclick = function (e) {
+  const r = e.target.closest('[data-sess]'); if (r) loadTrace(r.dataset.sess);
+};
+
+/* ---------------- 人工复核 ---------------- */
+function srcBlock(it) {
+  const src = it.sources || [];
+  if (!src.length) {
+    return '<div class="rvsrc"><div class="sh"><span>检索到的知识 · 回答只能基于这些</span></div>' +
+      '<div class="none">没有检索到任何条目——此时回答里出现的任何具体信息都算编造。</div></div>';
+  }
+  return '<div class="rvsrc"><div class="sh">' +
+    '<span>检索到的知识 · <b>回答只能基于这些，多出来的就是编造</b></span>' +
+    '<span style="font-family:\'IBM Plex Mono\',monospace;font-size:10px">' + esc(it.retrieval_note || '') + '</span></div>' +
+    src.map(function (x) {
+      return '<div class="si"><span class="lv ' + (x.level === 'L3' ? 'l3' : '') + '">' + esc(x.level) + '</span>' +
+        (x.stale ? '<span class="lv stale">已过期</span>' : '') +
+        '<b>' + esc(x.question) + '</b><br>' + esc(x.answer) +
+        '<br><span style="color:var(--ink3);font-size:10.5px">' + esc(x.citation) + ' · 相关度 ' + x.score + '</span></div>';
+    }).join('') + '</div>';
+}
+
+async function loadReview() {
+  try {
+    const d = await api('/ops/review');
+    CRIT = d.criteria || {};
+    $('#rv-prog').textContent = d.progress.reviewed + ' / ' + d.progress.total;
+    $('#rv-agree').textContent = d.agreement === null ? '待标注' : (d.agreement * 100).toFixed(1) + '%';
+    const bc = d.by_category || {};
+    const cats = Object.entries(bc).map(function (kv) { return kv[0] + ' ' + kv[1].agree + '/' + kv[1].n; }).join(' · ');
+    $('#rv-bycat').innerHTML = cats ? '<b>分类别：</b>' + esc(cats) : '';
+    $('#rv-note').textContent = d.sampling_note || '';
+    const left = d.progress.total - d.progress.reviewed;
+    $('#rv-badge').textContent = left ? '· ' + left + ' 条待判' : '· 已判完';
+    $('#op-agree').innerHTML = '<div class="note" style="margin-top:10px"><span class="nt">判分可信度</span>' +
+      '人工复核抽样 <b>20%</b>，当前一致率 <b>' +
+      (d.agreement === null ? '还没有人标注' : (d.agreement * 100).toFixed(1) + '%') +
+      '</b>。<b>在有人标完之前，上面那个通过率只能算机器自评。</b></div>';
+
+    const dis = new Set(d.disagreements || []);
+    $('#rv-list').innerHTML = d.items.map(function (it) {
+      const done = it.human_verdict !== null && it.human_verdict !== undefined;
+      const cls = done ? (dis.has(it.id) ? 'rvitem dis' : 'rvitem done') : 'rvitem';
+      const mv = it.machine_verdict ? '<span class="bg b-auto">机器判：合格</span>'
+                                    : '<span class="bg b-block">机器判：不合格</span>';
+      return '<div class="' + cls + '" data-rv="' + it.id + '">' +
+        '<div class="rvhd"><span class="id">' + esc(it.id) + ' · ' + esc(it.cat) + '</span>' +
+        '<span class="q">' + esc(it.q) + '</span>' + mv + '</div>' +
+        '<div class="rvcrit"><b>判这个：</b>' + esc(CRIT[it.cat] || '这个回答合格吗？') + '<br>' +
+        '<span style="color:var(--ink3)">机器的理由：' + esc(it.detail || '—') + '</span></div>' +
+        srcBlock(it) +
+        '<div class="rvans"><b style="color:var(--ink)">Agent 的回答：</b>\n' + esc(it.answer || '（空）') + '</div>' +
+        '<div class="rvnote"><span class="lbl2"><b>你的意见</b>（不同意机器时尤其要写——理由才是能拿去改判分器的东西）</span>' +
+        '<textarea data-note="' + it.id + '" placeholder="例：泄露了内部引用标记 [2]；把推断的日期当事实说；漏了 rubric 里的「主题聚合」">' +
+        esc(it.human_note || '') + '</textarea></div>' +
+        '<div class="rvfoot">' +
+        '<button class="btn ' + (done && !dis.has(it.id) ? 'pri' : '') + '" data-v="agree" data-id="' + it.id + '">同意机器</button>' +
+        '<button class="btn ' + (dis.has(it.id) ? 'pri' : '') + '" data-v="dis" data-id="' + it.id + '">机器判错了</button>' +
+        '<button class="btn" data-v="note" data-id="' + it.id + '">只存意见</button>' +
+        '<button class="btn" data-v="clear" data-id="' + it.id + '">清除</button>' +
+        '<span class="hint">' + (done ? (dis.has(it.id) ? '已记为分歧' : '已记为一致') : '未判') + '</span>' +
+        '</div></div>';
+    }).join('');
+  } catch (e) { $('#rv-list').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; }
+}
+
+$('#rv-list').onclick = async function (e) {
+  const b = e.target.closest('[data-v]'); if (!b) return;
+  const id = b.dataset.id, act = b.dataset.v;
+  const ta = document.querySelector('[data-note="' + id + '"]');
+  const note = ta ? ta.value : '';
+  const cur = (await api('/ops/review')).items.find(function (x) { return x.id === id; });
+  let v = cur.human_verdict != null ? cur.human_verdict : null, only = false;
+  if (act === 'agree') v = cur.machine_verdict;
+  else if (act === 'dis') v = !cur.machine_verdict;
+  else if (act === 'clear') v = null;
+  else if (act === 'note') only = true;
+  try {
+    await api('/ops/review', j('POST', { id: id, verdict: v, note: act === 'clear' ? '' : note }));
+    loadReview();
+    toast(act === 'clear' ? '已清除' : (only ? '意见已保存' : '已记录'));
+  } catch (x) { toast(x.message); }
+};
+
+$('#rv-list').addEventListener('blur', async function (e) {
+  const ta = e.target.closest('[data-note]'); if (!ta) return;
+  const id = ta.dataset.note;
+  const cur = (await api('/ops/review')).items.find(function (x) { return x.id === id; });
+  if ((cur.human_note || '') === ta.value) return;
+  try {
+    await api('/ops/review', j('POST', { id: id, verdict: cur.human_verdict != null ? cur.human_verdict : null, note: ta.value }));
+    toast('意见已存');
+  } catch (x) {}
+}, true);
+
+(async function () {
+  ME = await mount('/ops'); if (!ME) return;
+  loadOps();
+  // 待判条数要在标签上先显示出来，否则没人知道那边有活儿
+  api('/ops/review').then(function (d) {
+    const left = d.progress.total - d.progress.reviewed;
+    $('#rv-badge').textContent = left ? '· ' + left + ' 条待判' : '· 已判完';
+  }).catch(function () {});
+})();
+</script>
+</body>
+</html>

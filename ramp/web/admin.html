@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>爬坡 Ramp · 管理后台</title>
+<link rel="stylesheet" href="/_shared.css">
+</head>
+<body>
+<div class="page">
+  <div class="head2">
+    <div><h2>管理后台</h2><div class="sub">账号与授权 · 知识库 · 系统状态</div></div>
+    <div class="vm"><span>账号 <b id="ad-users">–</b></span><span>在线会话 <b id="ad-sess">–</b></span></div>
+  </div>
+
+  <div class="tabs" style="max-width:420px" role="tablist">
+    <button role="tab" aria-selected="true" data-pane="u">用户与授权 <span id="u-badge"></span></button>
+    <button role="tab" aria-selected="false" data-pane="k">知识库</button>
+    <button role="tab" aria-selected="false" data-pane="s">系统</button>
+  </div>
+
+  <!-- ---------------- 用户 ---------------- -->
+  <div class="pane on" data-pane="u"><div class="shell"><div class="pad">
+    <div class="note" style="margin-bottom:14px"><span class="nt">管理员能做什么 / 不能做什么</span>
+      能：<b>激活账号、分配角色、绑定员工档案、重置密码、删除账号</b>。<br>
+      不能：<b>看新人的提问原文</b>。管理员权限管的是"账号和配置"，不是"绕过可见性矩阵"——
+      这两件事经常被混为一谈，很多系统里 admin 等于上帝。<br>
+      <span style="color:var(--ink3)">你现在的 views 是 <code id="my-views"></code>，里面<b>没有 newbie</b>。
+      直接开新人的 memory 接口，服务端照样 403。</span>
+    </div>
+    <div class="tw"><table class="utab" id="u-tab"></table></div>
+    <p class="hint" style="margin-top:10px">改角色 / 改 employee_id 后要点「保存」才生效。
+      停用会<b>同时踢掉该账号的在线会话</b>，不是等它自然过期——否则停用只是个摆设。</p>
+  </div></div></div>
+
+  <!-- ---------------- 知识库 ---------------- -->
+  <div class="pane" data-pane="k"><div class="shell"><div class="pad adm">
+    <div>
+      <input class="search" id="k-q" placeholder="搜索知识条目（问题 / 答案 / 来源）">
+      <div id="k-list"></div>
+    </div>
+    <div>
+      <div class="pnl"><div class="pl"><span id="k-mode">新增条目</span><span id="k-id"></span></div>
+        <div class="kbform">
+          <div><label>域</label><select id="k-domain">
+            <option value="hr">hr · 人事制度</option>
+            <option value="eng">eng · 研发流程</option>
+            <option value="biz">biz · 业务知识</option>
+          </select></div>
+          <div><label>问题</label><input id="k-question" placeholder="新人会怎么问这件事"></div>
+          <div><label>答案</label><textarea id="k-answer" placeholder="回答。写得具体一点——检索命中后原文会直接进上下文"></textarea></div>
+          <div class="kbrow">
+            <div><label>来源等级</label><select id="k-level">
+              <option value="L1">L1 · 制度原文</option>
+              <option value="L2" selected>L2 · 人工确认</option>
+              <option value="L3">L3 · 口口相传</option>
+            </select></div>
+            <div><label>来源名称</label><input id="k-source" placeholder="如：员工手册 v3.2"></div>
+          </div>
+          <div class="kbrow">
+            <div><label>确认人</label><input id="k-by" placeholder="选填"></div>
+            <div><label>失效日期</label><input id="k-exp" type="date"></div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:4px">
+            <button class="btn pri" id="k-save">保存</button>
+            <button class="btn" id="k-new">清空 / 新建</button>
+          </div>
+        </div>
+        <div class="note" style="margin-top:12px"><span class="nt">保存会做两件事</span>
+          写库 + <b>立刻重算这条的向量并重建索引</b>。<br>
+          少了第二步，管理员改完在前台搜不到，会以为没生效——
+          而实际上库里已经改了，只是检索还在用旧索引。<b>这种"改了但看不见"最难查。</b></div>
+        <div class="note" style="margin-top:10px"><span class="nt">L3 是干什么用的</span>
+          L3 打了 <b>0.75 的乘法上限</b>，结构上过不了 0.62 的作答阈值——
+          录进去不是为了让它直接回答，是为了让它<b>能被检索到、然后触发升级</b>。
+          过期条目同理。</div>
+      </div>
+    </div>
+  </div></div></div>
+
+  <!-- ---------------- 系统 ---------------- -->
+  <div class="pane" data-pane="s"><div class="shell"><div class="pad">
+    <div class="grid g3" id="s-kpi"></div>
+    <div class="grid g2" style="margin-top:14px">
+      <div class="pnl"><div class="pl"><span>数据表</span><span>行数</span></div>
+        <div class="tw" style="border:0"><table id="s-tab"></table></div></div>
+      <div>
+        <div class="pnl"><div class="pl"><span>运行配置</span><span>只读</span></div>
+          <div class="tw" style="border:0"><table id="s-cfg"></table></div></div>
+        <div class="pnl" id="s-ls" style="margin-top:14px"></div>
+        <div class="pnl" style="margin-top:14px"><div class="pl"><span>在线会话</span><span>可撤销</span></div>
+          <div class="tw" style="border:0"><table id="s-sess"></table></div>
+          <p class="hint" style="margin-top:9px">会话存在库里而不是签名 token。JWT 那种签完就撤不回来——
+            登出之后串还是有效的，只是客户端把它丢了。<b>对一个承诺"记忆可删"的产品，登出必须真的失效。</b></p></div>
+      </div>
+    </div>
+  </div></div></div>
+</div>
+
+<script src="/_shared.js"></script>
+<script>
+let ME = null, ROLES = [], KB = [], editing = null;
+
+$$('.tabs button').forEach(function (b) {
+  b.onclick = function () {
+    $$('.tabs button').forEach(function (x) { x.setAttribute('aria-selected', String(x === b)); });
+    $$('.pane').forEach(function (p) { p.classList.toggle('on', p.dataset.pane === b.dataset.pane); });
+    if (b.dataset.pane === 'k' && !KB.length) loadKB();
+    if (b.dataset.pane === 's') loadSystem();
+  };
+});
+
+/* ---------------- 用户 ---------------- */
+
+/** 绑定的那份档案是谁。
+ *
+ *  只显示一个 `e_zhouyu`，管理员没法判断绑对没有。绑定关系决定了
+ *  这个账号能读**谁的**提问原文——绑错就等于把别人的私密提问
+ *  交到这个人手里，而 own_employee() 那道防线比对的正是这条绑定，
+ *  所以它不会报警，只会一本正经地放行。**这一栏不是装饰。**
+ */
+function bindNote(u) {
+  if (!u.employee_id) {
+    return '<div class="bind hint">未绑定 · 打不开新人工作台</div>';
+  }
+  if (u.binding_missing) {
+    return '<div class="bind bad">⚠ 查无此档案 —— 这个账号打不开工作台</div>';
+  }
+  const who = esc(u.employee_name) + '<span class="sub2i"> · ' + esc(u.employee_team || '') + '</span>';
+  if (u.name_mismatch) {
+    return '<div class="bind warn">⚠ 绑的是 <b>' + who + '</b><br>' +
+      '档案名和账号名「' + esc(u.display_name) + '」对不上，确认没绑错人</div>';
+  }
+  return '<div class="bind ok">' + who + '</div>';
+}
+
+function renderUsers(users) {
+  ROLES = ROLES.length ? ROLES : ['newbie', 'mentor', 'hr', 'ops', 'admin'];
+  const pending = users.filter(function (u) { return !u.active; }).length;
+  $('#u-badge').textContent = pending ? '· ' + pending + ' 待激活' : '';
+  $('#ad-users').textContent = users.length;
+  $('#u-tab').innerHTML =
+    '<thead><tr><th>账号</th><th>姓名</th><th>角色</th><th>员工档案</th><th>状态</th><th>操作</th></tr></thead><tbody>' +
+    users.map(function (u) {
+      const self = u.username === ME.username;
+      const opts = ROLES.map(function (r) {
+        return '<option value="' + r + '"' + (r === u.role ? ' selected' : '') + '>' + r + '</option>';
+      }).join('');
+      return '<tr data-u="' + esc(u.username) + '">' +
+        '<td class="n">' + esc(u.username) + (self ? ' <span class="hint">(你)</span>' : '') + '</td>' +
+        '<td>' + esc(u.display_name) + '</td>' +
+        '<td><select data-f="role">' + opts + '</select></td>' +
+        '<td><input data-f="employee_id" value="' + esc(u.employee_id || '') + '" placeholder="e_xxx / m_xxx">' +
+          bindNote(u) + '</td>' +
+        '<td><span class="pill ' + (u.active ? 'on' : 'off') + '">' + (u.active ? '已激活' : '待激活') + '</span></td>' +
+        '<td style="white-space:nowrap">' +
+          '<button class="mini" data-act="save">保存</button> ' +
+          '<button class="mini" data-act="toggle">' + (u.active ? '停用' : '激活') + '</button> ' +
+          '<button class="mini" data-act="pw">改密</button> ' +
+          '<button class="mini danger" data-act="del">删除</button>' +
+        '</td></tr>';
+    }).join('') + '</tbody>';
+}
+
+async function loadUsers() {
+  try {
+    const d = await api('/admin/users');
+    ROLES = d.roles || ROLES;
+    renderUsers(d.users);
+  } catch (e) { $('#u-tab').innerHTML = '<tbody><tr><td class="err">' + esc(e.message) + '</td></tr></tbody>'; }
+}
+
+$('#u-tab').onclick = async function (e) {
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const tr = b.closest('[data-u]'), username = tr.dataset.u, act = b.dataset.act;
+  const body = { username: username };
+  if (act === 'save') {
+    body.role = tr.querySelector('[data-f=role]').value;
+    body.employee_id = tr.querySelector('[data-f=employee_id]').value.trim();
+  } else if (act === 'toggle') {
+    body.active = tr.querySelector('.pill').classList.contains('off');
+  } else if (act === 'pw') {
+    const pw = prompt('给 ' + username + ' 设置新密码（至少 8 位）。\n注意：改密会踢掉该账号所有在线会话。');
+    if (!pw) return;
+    body.new_password = pw;
+  } else if (act === 'del') {
+    if (!confirm('删除账号 ' + username + '？\n\n这只删账号，不删他的员工档案和记忆——那两样归业务数据管。')) return;
+  }
+  try {
+    const r = await api(act === 'del' ? '/admin/users/delete' : '/admin/users/update', j('POST', body));
+    toast(r.message);
+    renderUsers(r.users);
+  } catch (x) { toast(x.message); }
+};
+
+/* ---------------- 知识库 ---------------- */
+function renderKB(items) {
+  $('#k-list').innerHTML = items.length ? items.map(function (k) {
+    const lv = '<span class="lv ' + (k.source_level === 'L3' ? 'l3' : '') + '" style="font-family:\'IBM Plex Mono\',monospace;font-size:9.5px;padding:1px 5px;border-radius:2px;background:var(--sunk);color:var(--ink3)">' +
+      esc(k.source_level) + '</span>';
+    return '<div class="kbitem"><b>' + esc(k.question) + '</b><br>' +
+      '<span style="color:var(--ink2)">' + esc(String(k.answer).slice(0, 130)) +
+      (String(k.answer).length > 130 ? '…' : '') + '</span>' +
+      '<div class="meta">' + lv + '<span>' + esc(k.domain) + '</span><span>' + esc(k.source_name || '') + '</span>' +
+      (k.stale ? '<span style="color:var(--crit)">已过期</span>' : '') +
+      '<span style="margin-left:auto"></span>' +
+      '<button data-edit="' + k.id + '">编辑</button>' +
+      '<button data-del="' + k.id + '">删除</button></div></div>';
+  }).join('') : '<p class="hint">没有匹配的条目。</p>';
+}
+
+async function loadKB() {
+  try {
+    const d = await api('/admin/knowledge');
+    KB = d.items || d;
+    renderKB(KB);
+  } catch (e) { $('#k-list').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; }
+}
+
+$('#k-q').oninput = function () {
+  const q = $('#k-q').value.trim().toLowerCase();
+  renderKB(!q ? KB : KB.filter(function (k) {
+    return (k.question + ' ' + k.answer + ' ' + (k.source_name || '')).toLowerCase().indexOf(q) >= 0;
+  }));
+};
+
+function fillForm(k) {
+  editing = k ? k.id : null;
+  $('#k-mode').textContent = k ? '编辑条目' : '新增条目';
+  $('#k-id').textContent = k ? '#' + k.id : '';
+  $('#k-domain').value = k ? k.domain : 'hr';
+  $('#k-question').value = k ? k.question : '';
+  $('#k-answer').value = k ? k.answer : '';
+  $('#k-level').value = k ? k.source_level : 'L2';
+  $('#k-source').value = k ? (k.source_name || '') : '';
+  $('#k-by').value = k ? (k.confirmed_by || '') : '';
+  $('#k-exp').value = k && k.expires_on ? k.expires_on : '';
+}
+
+$('#k-list').onclick = async function (e) {
+  const ed = e.target.closest('[data-edit]');
+  if (ed) {
+    const k = KB.find(function (x) { return String(x.id) === ed.dataset.edit; });
+    fillForm(k); window.scrollTo({ top: 0, behavior: 'smooth' }); return;
+  }
+  const dl = e.target.closest('[data-del]');
+  if (dl) {
+    if (!confirm('删除这条知识？删掉之后检索就命中不到了，相关提问会走升级路径。')) return;
+    try {
+      await api('/admin/knowledge/delete', j('POST', { id: +dl.dataset.del }));
+      toast('已删除，索引已重建'); await loadKB();
+      if (String(editing) === dl.dataset.del) fillForm(null);
+    } catch (x) { toast(x.message); }
+  }
+};
+
+$('#k-new').onclick = function () { fillForm(null); };
+$('#k-save').onclick = async function () {
+  const body = {
+    domain: $('#k-domain').value,
+    question: $('#k-question').value.trim(),
+    answer: $('#k-answer').value.trim(),
+    source_level: $('#k-level').value,
+    source_name: $('#k-source').value.trim() || '管理后台录入',
+    confirmed_by: $('#k-by').value.trim(),
+    expires_on: $('#k-exp').value || null,
+  };
+  if (!body.question || !body.answer) { toast('问题和答案都要填'); return; }
+  if (editing) body.id = editing;
+  $('#k-save').disabled = true;
+  try {
+    const r = await api('/admin/knowledge/save', j('POST', body));
+    toast(r.message + '（向量已重算，索引已重建）');
+    await loadKB();
+    fillForm(null);
+  } catch (x) { toast(x.message); }
+  $('#k-save').disabled = false;
+};
+
+/* ---------------- 系统 ---------------- */
+async function loadSystem() {
+  try {
+    const d = await api('/admin/overview');
+    const c = d.counts, ck = d.checkpointer || {};
+    $('#s-kpi').innerHTML =
+      '<div class="pnl kpi"><div class="pl"><span>知识条目</span></div><div class="v">' + c.knowledge +
+        '</div><div class="d">' + Object.entries(d.knowledge_by_level || {}).map(function (kv) {
+          return kv[0] + ' ' + kv[1];
+        }).join(' · ') + '</div></div>' +
+      '<div class="pnl kpi neu"><div class="pl"><span>累计成本</span></div><div class="v" style="font-size:22px">' +
+        money(d.total_cost) + '</div><div class="d">' + c.traces + ' 个 span 累加</div></div>' +
+      '<div class="pnl kpi neu"><div class="pl"><span>Checkpoint</span></div><div class="v">' +
+        (ck.checkpoints != null ? ck.checkpoints : '—') + '</div><div class="d">' +
+        (ck.threads != null
+          ? ck.threads + ' 个线程 · ' + (ck.pending_writes || 0) + ' 条中间写<br>' +
+            '<span class="m" style="font-size:10px;color:var(--ink3)">' +
+            Object.entries(ck.by_namespace || {}).map(function (kv) {
+              return esc(kv[0]) + ' ' + kv[1];
+            }).join(' · ') + '</span>'
+          : 'MySQLSaver 未连接') + '</div></div>';
+
+    $('#s-tab').innerHTML = '<thead><tr><th>表</th><th>行数</th></tr></thead><tbody>' +
+      [['employees 员工档案', c.employees], ['knowledge 知识条目', c.knowledge],
+       ['memories 三层记忆', c.memories], ['sessions 会话', c.sessions],
+       ['escalations 升级卡片', c.escalations], ['traces 调用留痕', c.traces],
+       ['users 账号', d.users]].map(function (kv) {
+        return '<tr><td>' + kv[0] + '</td><td class="n">' + kv[1] + '</td></tr>';
+      }).join('') + '</tbody>';
+
+    // LangSmith 的状态**必须显式说出来**。"以为开着其实没开"和
+    // "以为脱敏了其实在传原文"，这两件事看界面都看不出来——
+    // 而后者会把产品的隐私承诺变成一句空话。
+    const ls = d.langsmith || {};
+    $('#s-ls').innerHTML =
+      '<div class="pl"><span>LangSmith 可观测</span><span>' +
+        (ls.enabled ? esc(ls.project || '') : '未启用') + '</span></div>' +
+      '<div class="redline ' + (!ls.enabled ? '' : ls.send_raw ? 'no' : 'ok') + '">' +
+        (!ls.enabled ? '未接入' : ls.send_raw ? '⚠ 正在上传提问原文' : '已启用 · 原文本地脱敏') +
+        '<span>' + esc(ls.endpoint || '') + '</span></div>' +
+      '<p class="hint" style="margin-top:9px">' + esc(ls.reason || '') + '</p>' +
+      (ls.enabled && !ls.send_raw
+        ? '<p class="hint" style="margin-top:7px">上传的是<b>结构</b>：节点树、子图层级、每步耗时、' +
+          'token、路由走向、检索分数。提问原文与回答在<b>离开本机之前</b>就被替换成 ' +
+          '<code>[已脱敏 · N 字]</code>——不是传上去再隐藏。</p>'
+        : '');
+
+    const g = d.config;
+    $('#s-cfg').innerHTML = '<thead><tr><th>项</th><th>值</th></tr></thead><tbody>' +
+      [['作答置信阈值', g.confidence_threshold],
+       ['建议相关度下限', g.advice_floor],
+       ['每周推送预算', g.weekly_push_budget + ' 次'],
+       ['一档模型', g.tier1],
+       ['二档模型', g.tier2],
+       ['Checkpoint 后端', g.checkpoint_backend],
+       ['当前计价时段', g.is_peak_now ? '标准时段（贵一倍）' : '优惠时段']].map(function (kv) {
+        return '<tr><td>' + kv[0] + '</td><td class="n">' + esc(String(kv[1])) + '</td></tr>';
+      }).join('') + '</tbody>';
+  } catch (e) { $('#s-kpi').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; }
+
+  try {
+    const d = await api('/admin/sessions');
+    $('#ad-sess').textContent = d.sessions.length;
+    $('#s-sess').innerHTML = '<thead><tr><th>账号</th><th>登录于</th><th>过期于</th></tr></thead><tbody>' +
+      (d.sessions.length ? d.sessions.map(function (s) {
+        return '<tr><td class="n">' + esc(s.username) + '</td><td class="n">' +
+          esc((s.created_at || '').slice(5, 16).replace('T', ' ')) + '</td><td class="n">' +
+          esc((s.expires_at || '').slice(5, 16).replace('T', ' ')) + '</td></tr>';
+      }).join('') : '<tr><td colspan="3" class="hint">没有活跃会话</td></tr>') + '</tbody>';
+  } catch (e) {}
+}
+
+(async function () {
+  ME = await mount('/admin'); if (!ME) return;
+  $('#my-views').textContent = (ME.views || []).join(', ');
+  loadUsers();
+  api('/admin/sessions').then(function (d) { $('#ad-sess').textContent = d.sessions.length; }).catch(function () {});
+})();
+</script>
+</body>
+</html>

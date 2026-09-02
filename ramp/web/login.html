@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>爬坡 Ramp · 登录</title>
+<link rel="stylesheet" href="/_shared.css">
+</head>
+<body>
+<div class="gate">
+  <div class="card">
+    <div class="brand"><div class="dot"></div><div><b style="font-size:14px">爬坡 Ramp</b>
+      <em style="font-style:normal;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.18em;color:var(--ink3);display:block">ONBOARDING AGENT</em></div></div>
+
+    <div class="tabs" role="tablist" style="margin-top:16px">
+      <button role="tab" aria-selected="true" data-pane="in">登录</button>
+      <button role="tab" aria-selected="false" data-pane="up">注册</button>
+    </div>
+
+    <!-- ---------- 登录 ---------- -->
+    <div class="pane on" data-pane="in">
+      <p class="sub2">不同角色登录后进入<b>不同的页面</b>——路由由服务端决定，不是前端隐藏。</p>
+      <label for="u">用户名</label>
+      <input id="u" autocomplete="username" autofocus>
+      <label for="pw">密码</label>
+      <input id="pw" type="password" autocomplete="current-password">
+      <button class="btn pri go" id="go">登录</button>
+      <div class="err2" id="err"></div>
+      <div class="demo">
+        <b>演示账号</b>（点用户名自动填入，密码统一 <code>ramp2026</code>）
+        <table><tbody>
+          <tr><td class="u" data-u="linxy">linxy</td><td>林小雨 · 新人 → /newbie</td></tr>
+          <tr><td class="u" data-u="chenhao">chenhao</td><td>陈昊 · Mentor → /mentor</td></tr>
+          <tr><td class="u" data-u="wangqian">wangqian</td><td>王倩 · HR → /hr</td></tr>
+          <tr><td class="u" data-u="ops">ops</td><td>运营 / 质量 → /ops</td></tr>
+          <tr><td class="u" data-u="admin">admin</td><td>管理员 → /admin</td></tr>
+        </tbody></table>
+        <p style="margin-top:10px">演示环境的固定密码是<b>刻意选择</b>，不是疏忽——
+        真实部署要接企业 SSO。库里存的是 PBKDF2-SHA256 + 独立 salt + 20 万次迭代，
+        <b>没有任何地方存明文</b>。</p>
+      </div>
+    </div>
+
+    <!-- ---------- 注册 ---------- -->
+    <div class="pane" data-pane="up">
+      <p class="sub2">注册后账号是<b>待激活</b>状态，需要管理员分配角色才能登录。</p>
+      <label for="ru">用户名</label>
+      <input id="ru" autocomplete="username" placeholder="3–32 位，字母 / 数字 / 下划线">
+      <label for="rn">姓名</label>
+      <input id="rn" autocomplete="name" placeholder="显示在系统里的名字">
+      <label for="rp">密码</label>
+      <input id="rp" type="password" autocomplete="new-password" placeholder="至少 8 位">
+      <label for="rp2">确认密码</label>
+      <input id="rp2" type="password" autocomplete="new-password">
+      <button class="btn pri go" id="rgo">提交注册</button>
+      <div class="err2" id="rerr"></div>
+      <div class="ok2" id="rok"></div>
+      <div class="demo">
+        <b>为什么注册表单里没有"选择角色"</b>
+        <p style="margin-top:8px">选了就等于自己给自己发权限。这个系统里 HR 能看到整批新人的聚合数据，
+        Mentor 能看到卡点信号，管理员能改知识库——这些<b>不该由一个注册表单决定</b>。</p>
+        <p style="margin-top:8px"><b>注册只证明"你是谁"，授权是另一件事。</b>
+        所以新账号建出来是 <code>active=false</code>，登录会被拒，直到管理员在后台激活并派角色。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/_shared.js"></script>
+<script>
+function show(name) {
+  $$('.tabs button').forEach(x => x.setAttribute('aria-selected', String(x.dataset.pane === name)));
+  $$('.pane').forEach(p => p.classList.toggle('on', p.dataset.pane === name));
+}
+// 直接访问 /register 时默认落在注册标签上
+if (location.pathname === '/register') show('up');
+
+$$('[data-pane]').forEach(b => { if (b.tagName === 'BUTTON') b.onclick = () => {
+  $$('.tabs button').forEach(x => x.setAttribute('aria-selected', String(x === b)));
+  $$('.pane').forEach(p => p.classList.toggle('on', p.dataset.pane === b.dataset.pane));
+};});
+
+async function doLogin() {
+  const u = $('#u').value.trim(), pw = $('#pw').value;
+  if (!u || !pw) { $('#err').textContent = '用户名和密码都要填'; return; }
+  $('#go').disabled = true; $('#err').textContent = '';
+  try {
+    const r = await fetch('/api/login', j('POST', { username: u, password: pw }));
+    if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || '登录失败'); }
+    const d = await r.json();
+    // 按角色跳自己的主页——服务端算好了给前端，不在前端写死映射
+    location.href = (d.me && d.me.home) || '/';
+  } catch (e) { $('#err').textContent = e.message; }
+  $('#go').disabled = false;
+}
+$('#go').onclick = doLogin;
+$('#pw').onkeydown = e => { if (e.key === 'Enter') doLogin(); };
+$('#u').onkeydown = e => { if (e.key === 'Enter') $('#pw').focus(); };
+$$('[data-u]').forEach(td => td.onclick = () => {
+  $('#u').value = td.dataset.u; $('#pw').value = 'ramp2026'; $('#pw').focus();
+});
+
+async function doRegister() {
+  const u = $('#ru').value.trim(), n = $('#rn').value.trim(),
+        p1 = $('#rp').value, p2 = $('#rp2').value;
+  $('#rerr').textContent = ''; $('#rok').textContent = '';
+  if (p1 !== p2) { $('#rerr').textContent = '两次输入的密码不一致'; return; }
+  $('#rgo').disabled = true;
+  try {
+    const r = await fetch('/api/register', j('POST', { username: u, password: p1, display_name: n }));
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.detail || '注册失败');
+    $('#rok').innerHTML = '✓ ' + esc(d.message) +
+      '<br>现在还<b>不能登录</b>——去找管理员（演示环境用 admin 账号）在后台激活并分配角色。';
+    ['#ru', '#rn', '#rp', '#rp2'].forEach(s => $(s).value = '');
+  } catch (e) { $('#rerr').textContent = e.message; }
+  $('#rgo').disabled = false;
+}
+$('#rgo').onclick = doRegister;
+$('#rp2').onkeydown = e => { if (e.key === 'Enter') doRegister(); };
+</script>
+</body>
+</html>

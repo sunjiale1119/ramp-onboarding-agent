@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>爬坡 Ramp · Mentor 带教</title>
+<link rel="stylesheet" href="/_shared.css">
+</head>
+<body>
+<div class="page">
+  <div class="head2">
+    <div><h2 id="mt-title">带教看板</h2><div class="sub" id="mt-sub">加载中…</div></div>
+    <div class="vm"><span>待回答 <b id="mt-open">–</b></span><span>已沉淀知识 <b id="mt-kb">–</b></span></div>
+  </div>
+  <div class="shell"><div class="pad grid g2">
+    <div id="mt-escs"></div>
+    <div>
+      <div class="pnl"><div class="pl"><span>卡点信号</span><span id="mt-day">—</span></div>
+        <div class="bars" id="mt-bars"></div><div id="mt-stuck"></div></div>
+      <div class="locked" style="margin-top:14px">
+        <div class="lh">🔒 提问原文 · 对你不可见</div>
+        <p>这不是权限不足，是<b>产品设计</b>。</p>
+        <p>如果新人知道每句话都会被你看到，他就不问了——而"不敢问"正是这个产品要解决的原始问题。
+          你拿到的是<b>主题聚合</b>与<b>卡点信号</b>，不是聊天记录。</p>
+        <p style="margin-top:8px;color:var(--ink3)">想验证的话：直接开 <code>/api/newbie/&lt;别人的id&gt;/memory</code>，
+          服务端返回 403。<b>这条边界在接口上，不在界面上。</b></p>
+      </div>
+      <div class="pnl" style="margin-top:14px"><div class="pl"><span>我的新人</span></div>
+        <div class="tw" style="border:0"><table id="mt-mentees"></table></div></div>
+    </div>
+  </div></div>
+</div>
+
+<script src="/_shared.js"></script>
+<script>
+let ME = null, MENTOR = null;
+
+async function loadMentor() {
+  try {
+    const res = await Promise.all([
+      api('/mentor/' + MENTOR + '/escalations'),
+      api('/mentor/' + MENTOR + '/mentees')
+    ]);
+    const escs = res[0], mentees = res[1];
+    $('#mt-open').textContent = escs.length;
+
+    $('#mt-escs').innerHTML = escs.length ? escs.slice(0, 6).map(function (c) {
+      return '<div class="esc" data-card="' + c.id + '">' +
+        '<div class="eh"><b>待你回答 · 知识库未覆盖</b><span>' + esc(c.from || '') + ' · #' + c.id + '</span></div>' +
+        '<div class="eb"><p class="q">' + esc(c.question) + '</p>' +
+        '<p class="ctx">' + esc(c.context || '') + '<br>' +
+        (c.hints || []).map(function (h) { return '· ' + esc(h); }).join('<br>') + '</p>' +
+        '<textarea placeholder="写下你的回答…"></textarea>' +
+        '<div class="act"><button class="btn pri" data-ans="' + c.id + '" data-sink="1">回答并沉淀到知识库</button>' +
+        '<button class="btn" data-ans="' + c.id + '" data-sink="0">只回复，不沉淀</button>' +
+        '<span class="hint">沉淀后标为 L2 · 由你确认 · 有效期 12 个月</span></div></div></div>';
+    }).join('') : '<div class="pnl"><div class="pl"><span>待回答</span></div>暂时没有待处理的升级。</div>';
+
+    $('#mt-mentees').innerHTML = '<thead><tr><th>新人</th><th>天数</th><th>节点</th></tr></thead><tbody>' +
+      mentees.map(function (m) {
+        return '<tr data-emp="' + m.id + '" style="cursor:pointer"><td>' + esc(m.name) +
+          '<br><span class="hint">' + esc(m.team) + ' · ' + esc(m.role) + '</span></td>' +
+          '<td class="n">D' + m.day + '</td><td class="n">' + m.nodes_done + '/' + m.nodes_total + '</td></tr>';
+      }).join('') + '</tbody>';
+    $('#mt-sub').textContent = '带 ' + mentees.length + ' 人 · 待处理 ' + escs.length + ' 条 · 点右下角某位新人看他的卡点';
+
+    if (mentees.length) loadSignals(mentees[0].id, mentees[0]);
+  } catch (e) { $('#mt-escs').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; }
+
+  api('/mentor/kb-count').then(function (d) { $('#mt-kb').textContent = d.knowledge_total; })
+    .catch(function () { $('#mt-kb').textContent = '—'; });
+}
+
+async function loadSignals(empId, meta) {
+  try {
+    const view = await api('/mentor/view/' + empId);
+    const tc = view.topic_counts || [];
+    const max = Math.max.apply(null, [1].concat(tc.map(function (x) { return x[1]; })));
+    $('#mt-bars').innerHTML = tc.length ? tc.map(function (x) {
+      return '<div class="bar2"><i>' + esc(x[0]) + '</i><u><b style="width:' +
+        (x[1] / max * 100) + '%"></b></u><em>' + x[1] + ' 次</em></div>';
+    }).join('') : '<p class="hint">这位新人还没有产生足够的信号。</p>';
+    $('#mt-stuck').innerHTML = view.stuck_signal
+      ? '<div class="note" style="margin-top:12px"><span class="nt">建议动作</span>' +
+        esc(view.stuck_signal.advice) + '</div>' : '';
+    if (meta) $('#mt-day').textContent = esc(meta.name) + ' · D' + meta.day;
+  } catch (e) { $('#mt-bars').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; }
+}
+
+async function answerCard(id, sink, text) {
+  try {
+    const r = await api('/mentor/answer', j('POST', {
+      escalation_id: +id, answer: text, confirmed_by: ME.display_name, sink: sink === '1'
+    }));
+    toast(sink === '1' ? '已沉淀为 L2 知识 #' + r.knowledge_id : '已回复，未沉淀');
+    loadMentor();
+  } catch (e) { toast('失败：' + e.message); }
+}
+
+$('#mt-escs').onclick = function (e) {
+  const b = e.target.closest('[data-ans]'); if (!b) return;
+  const t = b.closest('.esc').querySelector('textarea').value.trim();
+  if (!t) { toast('先写点内容'); return; }
+  answerCard(b.dataset.ans, b.dataset.sink, t);
+};
+document.addEventListener('click', function (e) {
+  const r = e.target.closest('[data-emp]'); if (!r) return;
+  loadSignals(r.dataset.emp, null);
+  $('#mt-day').textContent = r.querySelector('td').textContent.split('\n')[0];
+});
+
+(async function () {
+  ME = await mount('/mentor'); if (!ME) return;
+  MENTOR = ME.employee_id;
+  $('#mt-title').textContent = ME.display_name + ' · 带教看板';
+  if (!MENTOR) {
+    $('#mt-sub').innerHTML = '这个 Mentor 账号还没绑定 <code>employee_id</code>，查不到他带的人——请管理员在后台补上。';
+    return;
+  }
+  loadMentor();
+})();
+</script>
+</body>
+</html>

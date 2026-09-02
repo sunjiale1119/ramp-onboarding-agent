@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>爬坡 Ramp · HR 看板</title>
+<link rel="stylesheet" href="/_shared.css">
+</head>
+<body>
+<div class="page">
+  <div class="head2">
+    <div><h2>People Ops 看板</h2><div class="sub">部门级聚合 · 不含提问原文，也不含任何个人明细</div></div>
+    <div class="vm"><span>本批 <b id="hr-cohort">–</b> 人</span></div>
+  </div>
+  <div class="shell"><div class="pad">
+    <div class="grid g3" id="hr-kpi"></div>
+    <div class="grid g2" style="margin-top:14px">
+      <div class="pnl"><div class="pl"><span>知识飞轮</span><span>升级 → 沉淀</span></div>
+        <div class="bars" id="hr-fly"></div>
+        <div class="note" style="margin-top:12px"><span class="nt">这条曲线就是续费理由</span>
+          客户用得越久知识资产越厚，<b>迁移成本越高</b>。ROI 曲线是上扬的。</div></div>
+      <div class="pnl"><div class="pl"><span>部门级卡点主题</span><span>仅占比</span></div>
+        <div class="bars" id="hr-topics"></div>
+        <div class="locked" style="margin-top:12px"><div class="lh">🔒 你看到的是聚合信号</div>
+          <p id="hr-note"></p></div></div>
+    </div>
+  </div></div>
+  <footer style="padding:16px 0 0">HR 这一页拿不到任何一位新人的提问原文，也拿不到"谁问了什么"。
+    人数少于 3 时连主题占比都不显示——<b>样本太小，占比本身就等于点名</b>。</footer>
+</div>
+
+<script src="/_shared.js"></script>
+<script>
+(async function () {
+  const ME = await mount('/hr'); if (!ME) return;
+  try {
+    const d = await api('/hr/dashboard');
+    $('#hr-cohort').textContent = d.cohort;
+    const f = d.flywheel;
+    $('#hr-kpi').innerHTML =
+      '<div class="pnl kpi"><div class="pl"><span>知识库规模</span></div><div class="v">' + f.knowledge_total +
+        '</div><div class="d">其中飞轮沉淀 ' + f.knowledge_l2_from_flywheel + ' 条</div></div>' +
+      '<div class="pnl kpi neu"><div class="pl"><span>升级总数</span></div><div class="v">' + f.escalations_total +
+        '</div><div class="d">待回答 ' + f.escalations_open + ' 条</div></div>' +
+      '<div class="pnl kpi neu"><div class="pl"><span>沉淀率</span></div><div class="v">' +
+        (f.sink_rate * 100).toFixed(1) + '<small>%</small></div><div class="d">已回答并入库 / 升级总数</div></div>' +
+      '<div class="pnl kpi neu"><div class="pl"><span>本批新人</span></div><div class="v">' + d.cohort +
+        '</div><div class="d">同期入职</div></div>';
+
+    $('#hr-fly').innerHTML = [['升级总数', f.escalations_total], ['待回答', f.escalations_open],
+      ['已沉淀', f.escalations_sunk]].map(function (kv) {
+      return '<div class="bar2"><i>' + kv[0] + '</i><u><b style="width:' +
+        (kv[1] / Math.max(1, f.escalations_total) * 100) + '%"></b></u><em>' + kv[1] + '</em></div>';
+    }).join('');
+
+    const tp = d.topics || [];
+    $('#hr-topics').innerHTML = tp.length ? tp.map(function (x) {
+      return '<div class="bar2"><i>' + esc(x[0]) + '</i><u><b style="width:' + (x[1] * 100) +
+        '%"></b></u><em>' + (x[1] * 100).toFixed(1) + '%</em></div>';
+    }).join('') : '<p class="hint">本批人数少于 3，主题占比不展示——<b>样本太小，占比本身就等于点名</b>。</p>';
+    $('#hr-note').textContent = d.note || '';
+  } catch (e) { $('#hr-kpi').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; }
+})();
+</script>
+</body>
+</html>

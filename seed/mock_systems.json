@@ -1,0 +1,96 @@
+{
+  "_meta": {
+    "notice": "演示用假数据，模拟三个外部系统的返回。含超时与失败分支，用来验证工具的降级路径。",
+    "systems": ["hr_system", "it_servicedesk", "org_directory"]
+  },
+
+  "employees": [
+    {
+      "id": "e_linxy", "name": "林小雨", "team": "数据组", "role": "后端工程师",
+      "domain": "biz", "mentor_id": "m_chenhao", "mentor_name": "陈昊",
+      "onboard_date": "2026-08-14"
+    },
+    {
+      "id": "e_zhouyu", "name": "孙佳乐", "team": "增长组", "role": "产品运营",
+      "domain": "biz", "mentor_id": "m_chenhao", "mentor_name": "陈昊",
+      "onboard_date": "2026-08-21"
+    }
+  ],
+
+  "hr_system": {
+    "e_linxy": {
+      "social_insurance": {
+        "status": "active", "first_month": "2026-08",
+        "base": "按入职当月应发工资核定", "city": "杭州"
+      },
+      "housing_fund": {
+        "status": "pending", "expected_open_by": "2026-09-10",
+        "note": "开户完成后将补缴 2026-08"
+      },
+      "onboarding_docs": {
+        "submitted": ["身份证", "学历学位证书", "离职证明", "体检报告", "银行卡"],
+        "missing": [], "deadline": "2026-08-20", "all_clear": true
+      },
+      "probation": {"end_date": "2026-11-14", "review_date": "2026-09-24"},
+      "leave_balance": {"annual": 1.5, "sick_used": 0, "personal_used": 0}
+    },
+    "e_zhouyu": {
+      "social_insurance": {"status": "active", "first_month": "2026-08", "base": "按入职当月应发工资核定", "city": "杭州"},
+      "housing_fund": {"status": "pending", "expected_open_by": "2026-09-18", "note": ""},
+      "onboarding_docs": {
+        "submitted": ["身份证", "学历学位证书", "银行卡"],
+        "missing": ["离职证明", "体检报告"], "deadline": "2026-08-27", "all_clear": false
+      },
+      "probation": {"end_date": "2026-11-21", "review_date": "2026-10-08"},
+      "leave_balance": {"annual": 1.0, "sick_used": 0, "personal_used": 1}
+    }
+  },
+
+  "it_servicedesk": {
+    "entitlements": {
+      "e_linxy": {
+        "granted": ["sso", "email", "wecom", "gitlab", "jira", "confluence", "vpn"],
+        "required_by_role": ["sso", "email", "wecom", "gitlab", "jira", "confluence", "vpn", "prod-db:ro"],
+        "pending": []
+      },
+      "e_zhouyu": {
+        "granted": ["sso", "email", "wecom", "jira", "confluence"],
+        "required_by_role": ["sso", "email", "wecom", "jira", "confluence", "ga-dashboard"],
+        "pending": ["ga-dashboard"]
+      }
+    },
+    "approvers": {
+      "prod-db:ro": {"name": "李敏", "title": "数据平台负责人", "sla_days": 2},
+      "prod-db:rw": {"name": "李敏", "title": "数据平台负责人", "sla_days": 5, "extra_review": "数据安全评审"},
+      "vpn": {"name": "周涛", "title": "信息安全组", "sla_days": 1},
+      "ga-dashboard": {"name": "孙立", "title": "增长负责人", "sla_days": 1},
+      "gitlab:maintainer": {"name": "陈昊", "title": "数据组 Tech Lead", "sla_days": 1}
+    },
+    "tickets": [],
+    "next_ticket_no": 20874,
+    "failure_simulation": {
+      "timeout_on_resource": "salary-system",
+      "note": "查询 salary-system 时模拟超时，用来验证工具失败后的降级文案"
+    }
+  },
+
+  "org_directory": {
+    "e_linxy": {"team": "数据组", "role": "后端工程师", "level": "P5", "leader": "李敏", "mentor": "陈昊"},
+    "e_zhouyu": {"team": "增长组", "role": "产品运营", "level": "P4", "leader": "孙立", "mentor": "陈昊"},
+    "m_chenhao": {"team": "数据组", "role": "Tech Lead", "level": "P7", "leader": "李敏"},
+    "contacts": {
+      "hrbp": {"name": "王倩", "channel": "企业微信 @王倩"},
+      "it_helpdesk": {"name": "IT 服务台", "channel": "企业微信 @IT服务台"},
+      "admin": {"name": "李娜", "channel": "企业微信 @李娜"}
+    }
+  },
+
+  "onboarding_timeline": [
+    {"day": 1,  "kind": "welcome",     "title": "身份与必读三件事",   "content": "账号已开通。今天先做三件事：读《员工手册》第 1–4 章、在「云启 HR」完成电子签、把工位设备连上 YunQi-Staff。"},
+    {"day": 3,  "kind": "entitlement", "title": "权限清单差额提醒",   "content": "对照你岗位的权限清单，还有未开通项。这类审批通常要 1–2 天，建议今天就提。"},
+    {"day": 5,  "kind": "docs",        "title": "入职材料截止倒计时", "content": "入职材料需在入职后 5 个工作日内交齐，否则影响社保申报与首月发薪。"},
+    {"day": 14, "kind": "checkpoint",  "title": "中期卡点复盘",       "content": "已经两周了。我把你这两周的卡点按主题汇总给了 Mentor，方便 1:1 时聊。"},
+    {"day": 21, "kind": "readiness",   "title": "首次交付准备度自检", "content": "距离转正评审还有一段时间，建议现在确认：是否已独立完成过一次完整交付？周报是否按时提交？"},
+    {"day": 30, "kind": "review",      "title": "转正材料与复盘",     "content": "转正材料需提前 5 个工作日提交。我可以帮你起草转正申请表里的「试用期工作总结」。"}
+  ]
+}
