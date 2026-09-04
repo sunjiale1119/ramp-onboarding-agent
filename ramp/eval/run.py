@@ -334,6 +334,11 @@ def run(
             print("   ✗", p_)
         raise SystemExit(2)
 
+    # 知识过期是**基线变动**，不是失败——但必须在看到分数之前说出来，
+    # 否则下次又会出现"代码没改，通过率自己掉了三条"的静默衰减。
+    for line in stale_warning():
+        print("  ⚠", line) if not line.startswith("    ") else print(line)
+
     items = golden["items"]
     if only:
         items = [i for i in items if i["cat"] == only]
@@ -408,11 +413,21 @@ def summarize(results: list[dict], golden: dict, *, elapsed: float) -> dict[str,
     cats = {}
     for cat, rows in by_cat.items():
         passed = sum(1 for r in rows if r["pass"])
+
+        # score 可能是 None —— 判分器自己出错时就是这样（judge_error）。
+        # 这一行原来写成 sum(r["score"] for r in rows)，遇到一个 None 就
+        # TypeError，**整份报告连同已经跑完的几十题一起丢掉**。
+        # 一次全量回归要 6 分钟、两毛钱，为了一个统计口径把它全废掉不划算。
+        #
+        # 教训：**汇总层不该假设明细层都成功了。**
+        # 判分失败是预期内的状态，不是异常。
+        scored = [r["score"] for r in rows if r.get("score") is not None]
         cats[cat] = {
             "n": len(rows),
             "passed": passed,
             "rate": round(passed / len(rows), 4),
-            "avg_score": round(sum(r["score"] for r in rows) / len(rows), 4),
+            "avg_score": round(sum(scored) / len(scored), 4) if scored else None,
+            "judge_errors": len(rows) - len(scored),
         }
 
     total = len(results)
@@ -474,6 +489,56 @@ def knowledge_fingerprint() -> dict[str, Any]:
         return {"count": len(rows), "by_level": levels, "digest": h.hexdigest()}
     finally:
         session.close()
+
+
+def stale_warning() -> list[str]:
+    """开跑前检查：知识库里有没有**刚过期**的条目。
+
+    ## 这个检查是被一次真实的静默衰减逼出来的
+
+    v10 那次跑出 60/60，三周后同一份代码同一个黄金集跑出 **57/60**。
+    代码没改、知识库没删，掉的三条全是考勤类 —— 因为
+    《考勤管理制度》的两条 L1 在 `2026-09-01` 到期了，而黄金集里
+    F04 要的「10:30/16:30」、F05 要的「3 次」、P06 要的补卡步骤，
+    答案全存在那两条里。
+
+    保鲜机制**正确地**把过期条目降权、拒答了。产品没错，
+    **错的是"100% 通过率"这个说法本身没有保质期**：
+    它只在某个日期成立，而报告里看不出这一点。
+
+    `knowledge_fingerprint()` 记了条数、分级和内容哈希，但它记不出
+    "今天有几条过期了" —— 内容没变，哈希就没变。
+    **指纹能发现知识库被改了，发现不了知识库过期了。**
+
+    所以补这一道：跑之前把「已过期」和「30 天内将过期」都报出来，
+    让人在看到分数之前先知道基线动过了。
+    """
+    from datetime import date, timedelta
+
+    from .. import db
+
+    today = date.today()
+    soon = today + timedelta(days=30)
+    msgs: list[str] = []
+    session = db.get_session()
+    try:
+        rows = session.query(db.Knowledge).filter(
+            db.Knowledge.expires_on.isnot(None)).all()
+        expired = [r for r in rows if r.expires_on < today]
+        upcoming = [r for r in rows if today <= r.expires_on <= soon]
+        if expired:
+            msgs.append(f"知识库有 {len(expired)} 条已过期，"
+                        "依赖它们的题会转人工（这是保鲜机制在工作，不是 bug）：")
+            for r in expired:
+                msgs.append(f"    {r.expires_on}  [{r.source_level}] {r.question[:30]}")
+        if upcoming:
+            msgs.append(f"另有 {len(upcoming)} 条将在 30 天内过期，"
+                        "到期后本次基线不再可复现：")
+            for r in upcoming:
+                msgs.append(f"    {r.expires_on}  [{r.source_level}] {r.question[:30]}")
+    finally:
+        session.close()
+    return msgs
 
 
 def _norm_out(out: str | None) -> Path:
@@ -679,7 +744,11 @@ def print_report(rep: dict[str, Any]) -> None:
     print()
     print(f"  {'类别':<14}{'条数':>5}{'通过':>6}{'通过率':>9}{'均分':>8}")
     for cat, c in rep["by_category"].items():
-        print(f"  {cat:<14}{c['n']:>5}{c['passed']:>6}{c['rate']:>9.1%}{c['avg_score']:>8.2f}")
+        avg = c.get("avg_score")
+        avg_s = f"{avg:>8.2f}" if avg is not None else f"{'—':>8}"
+        errs = c.get("judge_errors") or 0
+        tail = f"   ⚠ {errs} 条判分失败" if errs else ""
+        print(f"  {cat:<14}{c['n']:>5}{c['passed']:>6}{c['rate']:>9.1%}{avg_s}{tail}")
     print()
     rl = rep["redline"]
     mark = "通过 ✓" if rl["ok"] else "未通过 ✗ —— 不允许上线"

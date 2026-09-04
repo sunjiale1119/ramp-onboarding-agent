@@ -21,6 +21,15 @@ from typing import Protocol
 
 import numpy as np
 
+# 必须导入 config —— **不是为了用它的常量，是为了它的导入副作用**。
+# config 在导入时跑 load_dotenv()，把 .env 里的 RAMP_EMBEDDING_BACKEND
+# 等变量灌进 os.environ。这个模块下面全靠 os.getenv() 选后端。
+#
+# 没有这一行的时候：谁先导入 config，这里就正常；谁单独导入 embeddings，
+# os.getenv 拿到 None，**静默退回 hashing 后端**——不报错、不警告，
+# 只是语义检索悄悄变差。部署到服务器时就是这么中招的。
+from . import config  # noqa: F401
+
 _CJK = re.compile(r"[一-鿿]")
 
 
