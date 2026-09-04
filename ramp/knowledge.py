@@ -232,7 +232,47 @@ class KnowledgeIndex:
         hits.sort(key=lambda h: h.score, reverse=True)
         hits = hits[:top_k]
         best = hits[0].score if hits else 0.0
-        return Retrieval(hits, best, best >= thr, domain, degraded=degraded)
+
+        # ---- 排序用混合分，"能不能作答"用余弦 ----
+        #
+        # 这两件事要分开，是被一组对照实验逼出来的结论。
+        #
+        # 原实现拿混合分同时干这两件事，结果 10 条「知识库里根本没有」的
+        # 提问里 **7 条被判定可作答**：
+        #
+        #     公司的宠物友好日是哪天？ 0.6327 → 命中「试用期多久？」
+        #     团建预算是多少？        0.7242 → 命中「报销标准是多少？」
+        #     董事长叫什么名字？      0.6380 → 命中「转正要交什么材料？」
+        #
+        # 根因：混合分里的 BM25 是 `bm_raw / bm_max` **除以本批最大值**归一化的。
+        # 全部候选都不相关时，最像的那个照样得 1.0，直接贡献 0.5 分把
+        # 无关条目推过阈值。归一化 BM25 只能回答"这批里哪个最像"，
+        # 回答不了"它到底像不像"——**把相对排名当成了绝对相关性。**
+        #
+        # 实测两个判据的可分性（负样本 10 条 / 正样本 15 条）：
+        #
+        #     混合分   负 [0.199, 0.846]  正 [0.528, 0.961]  间隔 -0.318  重叠
+        #     余弦     负 [0.265, 0.692]  正 [0.745, 0.922]  间隔 +0.054  可分
+        #
+        # 混合分区间是**重叠**的——它在数学上就不可能作为判据，
+        # 调任何阈值都会顾此失彼。余弦有界 [0,1] 且有绝对含义，能分开。
+        #
+        # 所以：混合分继续排序（BM25 对专有名词的召回有价值），
+        # 但闸门只认余弦。三方案对照的结果是
+        # A 只看混合分 漏 7/10、B 双条件 误伤 1/15、C 只看余弦 0 漏 0 误伤。
+        #
+        # ⚠️ 可用区间只有 0.054 宽，不算宽裕。知识库规模变化后要重新标定，
+        # 脚本在 `scripts/calibrate_gate.py`。
+        if degraded:
+            # 没有向量时余弦全是 0，这道闸会把一切拦死。
+            # 降级本来就已经乘了 DEGRADED_PENALTY 降自信度，这里退回混合分判据。
+            confident = best >= thr
+        else:
+            confident = (best >= thr
+                         and bool(hits)
+                         and hits[0].dense >= config.SEMANTIC_FLOOR)
+
+        return Retrieval(hits, best, confident, domain, degraded=degraded)
 
 
 _index: KnowledgeIndex | None = None
