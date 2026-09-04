@@ -739,6 +739,87 @@ def admin_overview(p: auth.Principal = Depends(require("admin"))) -> dict[str, A
     }
 
 
+# ------------------------------------------------------------------ 外部系统
+@app.get("/api/admin/external")
+def admin_external(p: auth.Principal = Depends(require("admin"))) -> dict[str, Any]:
+    """外部系统里有哪些人和数据。**只读，Ramp 不拥有这些。**
+
+    ## 为什么需要这一页
+
+    有人提了个权限工单，Agent 回答"审批人李敏（数据平台负责人）"，
+    然后管理员翻遍后台**找不到李敏这个人** —— 看起来像 Agent 编的。
+
+    实际上李敏存在，只是存在于**另一个地方**：系统里的"人"分散在三处 ——
+
+        employees 表                新人档案（Ramp 自己的数据）
+        employees.mentor_* 字段     Mentor（不是独立记录）
+        外部系统 org_directory      leader、HRBP、行政
+        外部系统 it_approvers       各类资源的审批人
+
+    前两处管理后台管得了，后两处**零可见性**。
+
+    ## 为什么不把李敏也塞进 employees 表
+
+    因为那会把只读的外部数据变成 Ramp 自己的数据。真实部署里
+    org_directory 和 it_servicedesk 是企业已有的 OA / 工单系统，
+    Ramp 通过工具只读访问，不负责维护 —— **谁拥有数据，谁负责它的正确性**。
+
+    所以这一页是**只读的**：让管理员能核对 Agent 说的人名确有其人、
+    审批人配的是谁、SLA 是几天，但改不了。要改去源系统改。
+    """
+    from . import tools as _tools  # noqa: F401  确保 mock 已加载
+
+    from .tools.builtin import mock
+
+    m = mock()
+    org = m.get("org_directory", {})
+    desk = m.get("it_servicedesk", {})
+
+    # 组织架构里出现过的所有人名，按角色归类
+    people: dict[str, dict[str, Any]] = {}
+
+    def note(name: str, role: str, ctx: str) -> None:
+        if not name:
+            return
+        rec = people.setdefault(name, {"name": name, "roles": [], "context": []})
+        if role not in rec["roles"]:
+            rec["roles"].append(role)
+        if ctx and ctx not in rec["context"]:
+            rec["context"].append(ctx)
+
+    for emp_id, rec in org.items():
+        if emp_id == "contacts" or not isinstance(rec, dict):
+            continue
+        note(rec.get("leader", ""), "直属 leader", f"{rec.get('team', '')} · 带 {emp_id}")
+        note(rec.get("mentor", ""), "Mentor", f"{rec.get('team', '')} · 带 {emp_id}")
+    for key, c in (org.get("contacts") or {}).items():
+        if isinstance(c, dict):
+            note(c.get("name", ""), {"hrbp": "HRBP", "it_helpdesk": "IT 服务台",
+                                     "admin": "行政"}.get(key, key),
+                 c.get("channel", ""))
+    approvers = []
+    for res, ap in (desk.get("approvers") or {}).items():
+        if not isinstance(ap, dict):
+            continue
+        approvers.append({"resource": res, "name": ap.get("name", ""),
+                          "title": ap.get("title", ""),
+                          "sla_days": ap.get("sla_days"),
+                          "extra_review": ap.get("extra_review")})
+        note(ap.get("name", ""), "审批人", f"{res} · {ap.get('title', '')}")
+
+    return {
+        "people": sorted(people.values(), key=lambda x: x["name"]),
+        "approvers": sorted(approvers, key=lambda x: x["resource"]),
+        "org": [{"employee_id": k, **v} for k, v in org.items()
+                if k != "contacts" and isinstance(v, dict)],
+        "contacts": [{"key": k, **v} for k, v in (org.get("contacts") or {}).items()
+                     if isinstance(v, dict)],
+        "source": "seed/mock_systems.json",
+        "note": ("这些数据来自外部系统（组织架构、IT 服务台），Ramp 只读。"
+                 "演示环境里它们是 mock JSON；真实部署应接企业已有的 OA / 工单系统。"),
+    }
+
+
 # ------------------------------------------------------------------ 员工档案
 @app.get("/api/admin/employees")
 def admin_employees(p: auth.Principal = Depends(require("admin"))) -> dict[str, Any]:

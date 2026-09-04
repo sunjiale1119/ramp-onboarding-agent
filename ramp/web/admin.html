@@ -13,10 +13,11 @@
     <div class="vm"><span>账号 <b id="ad-users">–</b></span><span>在线会话 <b id="ad-sess">–</b></span></div>
   </div>
 
-  <div class="tabs" style="max-width:420px" role="tablist">
+  <div class="tabs" style="max-width:560px" role="tablist">
     <button role="tab" aria-selected="true" data-pane="u">用户与授权 <span id="u-badge"></span></button>
     <button role="tab" aria-selected="false" data-pane="k">知识库</button>
     <button role="tab" aria-selected="false" data-pane="e">员工档案</button>
+    <button role="tab" aria-selected="false" data-pane="x">外部系统</button>
     <button role="tab" aria-selected="false" data-pane="s">系统</button>
   </div>
 
@@ -123,6 +124,45 @@
     </div>
   </div></div></div>
 
+  <!-- ---------------- 外部系统（只读） ---------------- -->
+  <div class="pane" data-pane="x"><div class="shell"><div class="pad">
+    <div class="note warn" style="margin-bottom:16px"><span class="nt">只读 · Ramp 不拥有这些数据</span>
+      有人提权限工单，Agent 回答「审批人<b>李敏</b>（数据平台负责人）」，
+      管理员翻遍后台却<b>找不到李敏这个人</b> —— 看起来像 Agent 编的。<br><br>
+      李敏确实存在，只是存在于<b>另一个地方</b>。系统里的「人」分散在四处：<br>
+      <code>employees</code> 表（新人档案）· <code>mentor_*</code> 字段（Mentor）·
+      <b>外部组织架构</b>（leader / HRBP / 行政）· <b>IT 服务台</b>（各资源审批人）。<br>
+      前两处在「员工档案」页管，<b>后两处就是这一页</b>。<br><br>
+      <b>为什么不把李敏也塞进员工表：</b>那会把只读的外部数据变成 Ramp 自己的。
+      真实部署里组织架构和工单系统是企业已有的，Ramp 只读访问、不负责维护 ——
+      <b>谁拥有数据，谁负责它的正确性</b>。所以这一页改不了，要改去源系统改。
+    </div>
+
+    <div class="grid g2">
+      <div>
+        <h3 style="font-size:15px;margin:0 0 10px">出现在 Agent 回答里的人</h3>
+        <div class="tw"><table id="x-people"></table></div>
+      </div>
+      <div>
+        <h3 style="font-size:15px;margin:0 0 10px">资源审批人 · IT 服务台</h3>
+        <div class="tw"><table id="x-appr"></table></div>
+      </div>
+    </div>
+
+    <div class="grid g2" style="margin-top:16px">
+      <div>
+        <h3 style="font-size:15px;margin:0 0 10px">组织架构</h3>
+        <div class="tw"><table id="x-org"></table></div>
+      </div>
+      <div>
+        <h3 style="font-size:15px;margin:0 0 10px">常用联系人</h3>
+        <div class="tw"><table id="x-contacts"></table></div>
+      </div>
+    </div>
+
+    <p class="hint" style="margin-top:12px" id="x-note"></p>
+  </div></div></div>
+
   <div class="pane" data-pane="s"><div class="shell"><div class="pad">
     <div class="grid g3" id="s-kpi"></div>
     <div class="grid g2" style="margin-top:14px">
@@ -152,6 +192,7 @@ $$('.tabs button').forEach(function (b) {
     $$('.pane').forEach(function (p) { p.classList.toggle('on', p.dataset.pane === b.dataset.pane); });
     if (b.dataset.pane === 'k' && !KB.length) loadKB();
     if (b.dataset.pane === 'e') loadEmployees();
+    if (b.dataset.pane === 'x') loadExternal();
     if (b.dataset.pane === 's') loadSystem();
   };
 });
@@ -237,6 +278,62 @@ $('#u-tab').onclick = async function (e) {
     renderUsers(r.users);
   } catch (x) { toast(x.message); }
 };
+
+/* ---------------- 外部系统（只读） ---------------- */
+
+/** 把外部系统里的人和审批配置摆出来，让 Agent 说的话可核对。
+ *
+ *  这一页解决的是一个具体的困惑：Agent 说"审批人李敏"，
+ *  管理员在后台找不到李敏，于是怀疑 Agent 在编。
+ *  实际上李敏在 IT 服务台的审批人配置里 —— 只是那份数据以前没有任何入口能看。
+ *
+ *  **可核对性本身就是产品功能**：一个会说人名的 Agent，
+ *  必须让人能查到那个人是谁、依据是什么。
+ */
+async function loadExternal() {
+  try {
+    var d = await api('/admin/external');
+
+    $('#x-people').innerHTML =
+      '<thead><tr><th>姓名</th><th>身份</th><th>出现在哪</th></tr></thead><tbody>' +
+      d.people.map(function (x) {
+        return '<tr><td><b>' + esc(x.name) + '</b></td><td>' +
+          x.roles.map(function (r) { return '<span class="pill on">' + esc(r) + '</span>'; }).join(' ') +
+          '</td><td style="font-size:12.5px;color:var(--ink3)">' +
+          x.context.map(esc).join('<br>') + '</td></tr>';
+      }).join('') + '</tbody>';
+
+    $('#x-appr').innerHTML =
+      '<thead><tr><th>资源</th><th>审批人</th><th>SLA</th></tr></thead><tbody>' +
+      d.approvers.map(function (a) {
+        return '<tr><td class="n">' + esc(a.resource) + '</td>' +
+          '<td>' + esc(a.name) + '<br><span class="hint">' + esc(a.title || '') + '</span></td>' +
+          '<td class="n">' + (a.sla_days != null ? a.sla_days + ' 个工作日' : '—') +
+          (a.extra_review ? '<br><span class="hint">+' + esc(a.extra_review) + '</span>' : '') +
+          '</td></tr>';
+      }).join('') + '</tbody>';
+
+    $('#x-org').innerHTML =
+      '<thead><tr><th>员工</th><th>团队 / 岗位</th><th>职级</th><th>Leader</th></tr></thead><tbody>' +
+      d.org.map(function (o) {
+        return '<tr><td class="n">' + esc(o.employee_id) + '</td>' +
+          '<td>' + esc(o.team || '') + ' · ' + esc(o.role || '') + '</td>' +
+          '<td class="n">' + esc(o.level || '—') + '</td>' +
+          '<td>' + esc(o.leader || '—') + '</td></tr>';
+      }).join('') + '</tbody>';
+
+    $('#x-contacts').innerHTML =
+      '<thead><tr><th>角色</th><th>姓名</th><th>联系方式</th></tr></thead><tbody>' +
+      d.contacts.map(function (c) {
+        return '<tr><td class="n">' + esc(c.key) + '</td><td>' + esc(c.name || '') +
+          '</td><td style="font-size:12.5px">' + esc(c.channel || '') + '</td></tr>';
+      }).join('') + '</tbody>';
+
+    $('#x-note').innerHTML = esc(d.note) + '　数据源：<code>' + esc(d.source) + '</code>';
+  } catch (e) {
+    $('#x-people').innerHTML = '<tbody><tr><td class="err">' + esc(e.message) + '</td></tr></tbody>';
+  }
+}
 
 /* ---------------- 员工档案 ---------------- */
 
