@@ -23,7 +23,8 @@ import re
 import random
 import time
 from collections import defaultdict
-from datetime import datetime
+from contextlib import contextmanager
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -110,17 +111,102 @@ def judge_fact(item: dict, res: dict) -> dict[str, Any]:
     }
 
 
+# 这些词出现在回答里，说明模型在**诚实地报告查不到**，而不是在编
+_HONEST_MISS = ("未接入", "没有接入", "查不到", "无法查询", "查询不到",
+                "系统当前未", "不是权限问题")
+
+
+def external_connected() -> bool:
+    """外部系统里有没有真数据。
+
+    判断依据是 mock_systems.json 里 hr_system / it_servicedesk 是否为空 ——
+    演示环境清空之后它们就是空的。
+    """
+    try:
+        from ramp.tools.builtin import mock
+
+        m = mock()
+        return bool(m.get("hr_system")
+                    or (m.get("it_servicedesk") or {}).get("entitlements")
+                    or {k: v for k, v in (m.get("org_directory") or {}).items()
+                        if k != "contacts"})
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def judge_cross(item: dict, res: dict) -> dict[str, Any]:
+    """跨系统查询。**判什么取决于外部系统接没接。**
+
+    ## 为什么要分两种
+
+    这类题问的是"我的社保交了吗""我的 leader 是谁" —— 答案在企业已有的
+    HR / 组织架构系统里，不在知识库里。
+
+    原来的判分只认一件事：**答案里有没有出现那个具体的值**。
+    那是在"外部系统里有虚构数据"的前提下写的。数据清空之后，
+    12 道题挂了 10 道，理由全是"工具✓，值 0/1" ——
+    工具调对了，只是没有值可取。
+
+    **但这时候正确的产品行为不是答出一个值，是诚实说查不到。**
+    照旧判分等于在惩罚我刚加的诚实降级能力。
+
+    所以分两种：
+
+        外部系统已接入   判"有没有取到正确的值"（原逻辑）
+        外部系统未接入   判"有没有正确地说查不到" ——
+                        工具要照样调（说明它知道该去查哪里），
+                        回答要明确说明未接入，**不能编一个值出来**
+
+    第二种其实是更难的测试：一个会编的模型在这里必然翻车。
+    """
     used = set(res.get("tools", []) or [])
     want = set(item.get("tools", []) or [])
     tool_ok = bool(want & used)
     ans = _norm(res.get("answer", ""))
-    hits = [m for m in item.get("must", []) if _covers(ans, m)]
-    value_ok = len(hits) == len(item.get("must", []))
+    must = item.get("must", [])
+
+    if external_connected():
+        hits = [m for m in must if _covers(ans, m)]
+        value_ok = len(hits) == len(must)
+        return {
+            "pass": tool_ok and value_ok,
+            "score": round((0.5 if tool_ok else 0)
+                           + 0.5 * len(hits) / max(1, len(must)), 3),
+            "detail": f"工具{'✓' if tool_ok else '✗'}{sorted(used)}；"
+                      f"值 {len(hits)}/{len(must)}",
+        }
+
+    # ---- 未接入：判诚实度 ----
+    honest = any(_norm(w) in ans for w in _HONEST_MISS)
+
+    # 编造检测。**只查够长的、能唯一定位的值**。
+    #
+    # 第一版拿 must 里的每个串做子串匹配，结果三条全是误报：
+    #
+    #   X03  must=['齐']      模型说「我不会凭印象替你判断"交齐了"」
+    #                         —— 它恰恰是在拒绝编造，却被判成编造
+    #   X01  must=['2026-08'] 模型说「按制度应从入职当月开始，但查不到实际记录」
+    #   X06  must=['11','14'] 模型说「制度是 3 个月，你的具体日期查不到」
+    #
+    # 「齐」「11」「14」这种一两个字符的串，随便一句话都能撞上。
+    # 而且这三条回答**全是正确行为**：先讲制度规则，再明说个人数据查不到。
+    #
+    # 判分器用字面匹配去惩罚更好的回答 —— 这是我在 procedure 判分上
+    # 已经踩过一次的坑，换个地方又踩了一遍。
+    #
+    # 现在只对长度 ≥ 4 的值报编造，而且要求它出现在**没有免责语境**的地方。
+    long_must = [m for m in must if len(_norm(str(m))) >= 4]
+    fabricated = [m for m in long_must if _covers(ans, m)] if not honest else []
+    ok = tool_ok and honest and not fabricated
+    bits = [f"工具{'✓' if tool_ok else '✗'}{sorted(used)}",
+            f"诚实说明{'✓' if honest else '✗'}"]
+    if fabricated:
+        bits.append(f"⚠ 编造了 {fabricated}")
     return {
-        "pass": tool_ok and value_ok,
-        "score": round((0.5 if tool_ok else 0) + 0.5 * len(hits) / max(1, len(item.get("must", []))), 3),
-        "detail": f"工具{'✓' if tool_ok else '✗'}{sorted(used)}；值 {len(hits)}/{len(item.get('must', []))}",
+        "pass": ok,
+        "score": round((0.4 if tool_ok else 0) + (0.6 if honest else 0)
+                       - (0.6 if fabricated else 0), 3),
+        "detail": "（外部系统未接入，判诚实度）" + "；".join(bits),
     }
 
 
@@ -316,91 +402,148 @@ JUDGES = {
 
 
 # ------------------------------------------------------------------ 运行
+EVAL_SUBJECT = "eval_subject"
+
+
+@contextmanager
+def eval_employee(username: str = EVAL_SUBJECT):
+    """评测用的临时员工，跑完就删。
+
+    ## 为什么不用现成的账号
+
+    原来这里写死 `employee_id="e_linxy"` —— 一个种子数据里的演示员工。
+    数据清零之后整套评测直接崩：`ValueError: 未知员工: e_linxy`，
+    60 题挂了 54 题，而**这跟被测代码一点关系都没有**。
+
+    评测依赖"环境里恰好存在某条数据"是个隐患：那条数据被谁删了、
+    改了入职日期、换了 Mentor，评测结果都会跟着变，
+    而看报告的人完全不知道基线动过。
+
+    现在评测自己造主体：固定的姓名、团队、岗位、入职日期（第 20 天），
+    跑完删掉。**同一份代码在任何一台机器上跑出来的基线是一样的。**
+    """
+    from ramp import auth
+
+    auth.delete_user(username)
+    auth.register(username, "evalonly-not-a-real-account", "评测主体")
+    ok, msg = auth.update_user(
+        username, role="newbie", display_name="评测主体",
+        team="数据组", title="后端工程师", domain="hr",
+        # 固定在第 20 天：30 天时间线的中段，前后都有未完成节点
+        onboard_date=(date.today() - timedelta(days=19)).isoformat(),
+        active=True,
+    )
+    if not ok:
+        raise RuntimeError(f"评测主体创建失败：{msg}")
+    try:
+        yield username
+    finally:
+        auth.delete_user(username)
+
+
 def run(
     *,
     limit: int | None = None,
     only: str | None = None,
-    employee_id: str = "e_linxy",
+    employee_id: str | None = None,
     out_path: str | None = None,
 ) -> dict[str, Any]:
-    from .. import config, runtime
 
-    golden = json.loads((HERE / "golden.json").read_text(encoding="utf-8"))
+    # 没指定主体就自己建一个临时的，跑完删掉。
+    #
+    # 原来这里写死 employee_id="e_linxy" —— 一个种子数据里的演示员工。
+    # 数据清零之后整套评测直接崩：ValueError: 未知员工，60 题挂了 54 题，
+    # 而**这跟被测代码一点关系都没有**。
+    #
+    # 评测依赖"环境里恰好存在某条数据"是个隐患：那条数据被谁删了、
+    # 改了入职日期、换了 Mentor，基线都会跟着变，而看报告的人不知道它动过。
+    _own = employee_id is None
+    _fx = eval_employee() if _own else None
+    if _own:
+        employee_id = _fx.__enter__()
+        print(f"  评测主体：{employee_id}（临时创建，跑完删除）")
+    try:
+        from .. import config, runtime
 
-    problems = validate_golden(golden)
-    if problems:
-        print(f"黄金集校验未通过（{len(problems)} 项），已中止，未产生任何模型调用：")
-        for p_ in problems[:20]:
-            print("   ✗", p_)
-        raise SystemExit(2)
+        golden = json.loads((HERE / "golden.json").read_text(encoding="utf-8"))
 
-    # 知识过期是**基线变动**，不是失败——但必须在看到分数之前说出来，
-    # 否则下次又会出现"代码没改，通过率自己掉了三条"的静默衰减。
-    for line in stale_warning():
-        print("  ⚠", line) if not line.startswith("    ") else print(line)
+        problems = validate_golden(golden)
+        if problems:
+            print(f"黄金集校验未通过（{len(problems)} 项），已中止，未产生任何模型调用：")
+            for p_ in problems[:20]:
+                print("   ✗", p_)
+            raise SystemExit(2)
 
-    items = golden["items"]
-    if only:
-        items = [i for i in items if i["cat"] == only]
-    if limit:
-        items = items[:limit]
+        # 知识过期是**基线变动**，不是失败——但必须在看到分数之前说出来，
+        # 否则下次又会出现"代码没改，通过率自己掉了三条"的静默衰减。
+        for line in stale_warning():
+            print("  ⚠", line) if not line.startswith("    ") else print(line)
 
-    started = time.time()
-    results: list[dict[str, Any]] = []
+        items = golden["items"]
+        if only:
+            items = [i for i in items if i["cat"] == only]
+        if limit:
+            items = items[:limit]
 
-    for n, item in enumerate(items, 1):
-        t0 = time.time()
-        try:
-            res = runtime.ask(item["q"], employee_id=employee_id, persist=False)
-            err = None
-        except Exception as exc:  # noqa: BLE001
-            res, err = {"answer": "", "route": "error"}, f"{type(exc).__name__}: {exc}"
+        started = time.time()
+        results: list[dict[str, Any]] = []
 
-        if err:
-            verdict = {"pass": False, "score": 0.0, "detail": err}
-        elif "expect_route" in item:
-            # 有些题的正确行为就是拒答（唯一来源已过期）。
-            # 这类题只判路径，不判内容——判内容等于要求模型引用过期文档。
-            ok, sc, detail = _score_expect_route(item, res)
-            verdict = {"pass": ok, "score": sc, "detail": detail}
-        else:
-            verdict = JUDGES[item["cat"]](item, res)
-        row = {
-            "id": item["id"],
-            "cat": item["cat"],
-            "judge_error": bool(verdict.get("judge_error")),
-            "q": item["q"],
-            "pass": verdict["pass"],
-            "score": verdict["score"],
-            "detail": verdict.get("detail", ""),
-            "rubric_score": verdict.get("rubric_score"),
-            "route": res.get("route"),
-            "domain": res.get("domain"),
-            "best_score": res.get("best_score"),
-            "tools": res.get("tools"),
-            # 存下**这次真正用到的**检索结果。
-            # 复核界面一度是在复核时重新检索的，top_k 和知识库都可能已经变了，
-            # 结果是让人对着错的证据判"有没有编造"——三条判定因此作废。
-            # 证据必须是当时那一份，重算的不算。
-            "hits": res.get("hits") or [],
-            "observations": res.get("observations") or [],
-            "cost": round(float(res.get("cost", 0)) + float(verdict.get("judge_cost", 0)), 6),
-            "elapsed_s": round(time.time() - t0, 2),
-            "answer": res.get("answer", "")[:800],
-        }
-        results.append(row)
-        mark = "✓" if row["pass"] else "✗"
-        print(f"  [{n:2d}/{len(items)}] {mark} {row['id']} {row['cat']:12s} {row['detail'][:52]}")
+        for n, item in enumerate(items, 1):
+            t0 = time.time()
+            try:
+                res = runtime.ask(item["q"], employee_id=employee_id, persist=False)
+                err = None
+            except Exception as exc:  # noqa: BLE001
+                res, err = {"answer": "", "route": "error"}, f"{type(exc).__name__}: {exc}"
 
-    report = summarize(results, golden, elapsed=time.time() - started)
-    path = _norm_out(out_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps({"report": report, "results": results}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    report["path"] = str(path)
-    return report
+            if err:
+                verdict = {"pass": False, "score": 0.0, "detail": err}
+            elif "expect_route" in item:
+                # 有些题的正确行为就是拒答（唯一来源已过期）。
+                # 这类题只判路径，不判内容——判内容等于要求模型引用过期文档。
+                ok, sc, detail = _score_expect_route(item, res)
+                verdict = {"pass": ok, "score": sc, "detail": detail}
+            else:
+                verdict = JUDGES[item["cat"]](item, res)
+            row = {
+                "id": item["id"],
+                "cat": item["cat"],
+                "judge_error": bool(verdict.get("judge_error")),
+                "q": item["q"],
+                "pass": verdict["pass"],
+                "score": verdict["score"],
+                "detail": verdict.get("detail", ""),
+                "rubric_score": verdict.get("rubric_score"),
+                "route": res.get("route"),
+                "domain": res.get("domain"),
+                "best_score": res.get("best_score"),
+                "tools": res.get("tools"),
+                # 存下**这次真正用到的**检索结果。
+                # 复核界面一度是在复核时重新检索的，top_k 和知识库都可能已经变了，
+                # 结果是让人对着错的证据判"有没有编造"——三条判定因此作废。
+                # 证据必须是当时那一份，重算的不算。
+                "hits": res.get("hits") or [],
+                "observations": res.get("observations") or [],
+                "cost": round(float(res.get("cost", 0)) + float(verdict.get("judge_cost", 0)), 6),
+                "elapsed_s": round(time.time() - t0, 2),
+                "answer": res.get("answer", "")[:800],
+            }
+            results.append(row)
+            mark = "✓" if row["pass"] else "✗"
+            print(f"  [{n:2d}/{len(items)}] {mark} {row['id']} {row['cat']:12s} {row['detail'][:52]}")
+
+        report = summarize(results, golden, elapsed=time.time() - started)
+        path = _norm_out(out_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"report": report, "results": results}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        report["path"] = str(path)
+        return report
+    finally:
+        if _fx is not None:
+            _fx.__exit__(None, None, None)
 
 
 def summarize(results: list[dict], golden: dict, *, elapsed: float) -> dict[str, Any]:
@@ -632,7 +775,8 @@ def agreement(review_path: str) -> dict[str, Any]:
     }
 
 
-def repeat_run(cat: str = "advice", *, times: int = 3, employee_id: str = "e_linxy") -> dict:
+def repeat_run(cat: str = "advice", *, times: int = 3,
+               employee_id: str | None = None) -> dict:
     """同一批题跑多次，报**稳定通过率**而不是单次通过率。
 
     起因：A07「1:1 该聊什么」的跑题缺陷在 v5、v6 两轮出现，v7 没出现，
@@ -770,7 +914,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="爬坡 Ramp 黄金集回归")
     ap.add_argument("--only", choices=list(JUDGES), help="只跑某一类")
     ap.add_argument("--limit", type=int, help="只跑前 N 条")
-    ap.add_argument("--employee", default="e_linxy")
+    ap.add_argument("--employee", default=None,
+                    help="指定评测主体；默认自动创建一个临时的")
     ap.add_argument("--out", help="报告输出路径")
     ap.add_argument("--repeat", type=int, default=0,
                     help="同一类题跑 N 次，报稳定通过率（默认对 advice）")

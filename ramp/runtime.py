@@ -42,6 +42,41 @@ def _load_context(session, employee_id: str) -> dict[str, Any]:
     }
 
 
+def _load_history(session, session_id: str) -> list[dict[str, str]]:
+    """把这个会话已有的对话读回来。
+
+    ## 为什么这一步以前是空的
+
+    `RampState.history` 这个字段一直在，`prompts.build(history=...)` 也支持，
+    `compact.py` 整套压缩逻辑都写好了 —— **只是从来没有人往里灌数据**。
+    每一轮 `new_state()` 都把 history 置成 []，于是每次提问都是全新开始。
+
+    症状很隐蔽：单轮问答完全正常，只有多轮指代才会露馅。实测
+
+        第 1 轮  社保什么时候开始交？    → 正常作答
+        第 2 轮  那我的有没有交？        → 不知道"交"指什么，
+                                          把 hr_query 打了三次（社保 / 公积金 /
+                                          入职材料）+ org_lookup，
+                                          最后回一句"你想确认的可能是以下之一"
+
+    **四次工具调用本来一次就够。** 而且答案是模糊的，因为它在猜。
+
+    ## 保留多少
+
+    只取最近 KEEP_RECENT_TURNS 轮的原文。再往前的由 compact 压成摘要 ——
+    对话越长带的历史越多，token 成本是线性涨上去的，而 30 天的会话
+    不可能全塞进上下文。
+    """
+    keep = config.KEEP_RECENT_TURNS * 2  # 一轮 = 用户 + 助手两条
+    rows = (session.query(db.Message)
+            .filter_by(session_id=session_id)
+            .order_by(db.Message.id.desc())
+            .limit(keep)
+            .all())
+    return [{"role": m.role, "content": m.content}
+            for m in reversed(rows) if m.role in ("user", "assistant")]
+
+
 def _topic_of(question: str, domain: str) -> str:
     """给情景记忆打的主题标签。用规则而不是模型——
     这个标签只用于聚合统计，不值得为它多花一次调用。"""
@@ -98,11 +133,17 @@ def ask(
     session = db.get_session()
     try:
         ctx = _load_context(session, employee_id)
+        history = _load_history(session, sid)
     finally:
         session.close()
 
     state = new_state(sid, employee_id, question)
     state.update(ctx)
+    # **无条件赋值**，即使是空列表。
+    # turn_scoped reducer 把"收到空列表"当作新一轮开始的信号去清掉旧值；
+    # 写成 `if history:` 的话，第一轮（历史为空）就不会触发重置，
+    # checkpointer 里上一个会话残留的历史会一直留着。
+    state["history"] = history
 
     cfg = {"configurable": {"thread_id": sid}, **tracing.run_config(sid, employee_id)}
     result = graph.compiled().invoke(state, cfg)

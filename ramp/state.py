@@ -21,6 +21,41 @@ def _last(a: Any, b: Any) -> Any:
     return b if b is not None else a
 
 
+def turn_scoped(a: list | None, b: list | None) -> list:
+    """本轮内累加，**跨轮重置**。
+
+    ## 为什么需要它
+
+    checkpointer 按 thread_id（= session_id）保留状态，所以同一个会话的
+    第二轮 invoke() 拿到的是**第一轮结束时的 state**，新值是"加"上去的。
+    对 `tool_calls` / `observations` / `history` 这类**每轮独立**的字段，
+    operator.add 的后果是：
+
+        第 2 轮  工具 ['hr_query']                    1 个
+        第 3 轮  工具 ['hr_query'×3]                  3 个
+        第 4 轮  工具 ['hr_query'×6]                  6 个   ← 而且这轮是
+        第 5 轮  工具 ['hr_query'×12]                12 个     纯检索路径，
+                                                              一个工具都没调
+
+    数字在翻倍，而且**报出了根本没发生过的调用**。
+    成本、耗时、工具成功率全部跟着失真。
+
+    ## 怎么区分"新一轮"
+
+    每轮开始时 runtime 会把这些字段显式置空（new_state 里就是 []）。
+    约定：**收到空列表 = 新一轮开始，丢掉旧的**；收到非空 = 本轮内追加。
+
+    这个约定成立的前提是节点永远不会"追加一个空列表"——
+    实际代码里节点要么不返回这个字段（不触发 reducer），
+    要么返回真实有内容的列表，所以安全。
+    """
+    if b is None:
+        return list(a or [])
+    if not b:                      # 显式传空 = 新一轮，旧的作废
+        return []
+    return [*(a or []), *b]
+
+
 def merge_spans(a: list[dict[str, Any]] | None,
                 b: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     """按 uid 去重的 span 累加器。
@@ -50,8 +85,9 @@ class RampState(TypedDict, total=False):
     question: str
 
     # ---- 会话 ----
-    history: Annotated[list[dict[str, str]], operator.add]
-    """完整对话。压缩节点会整体替换它，所以 compact 用的是 override 而非 add。"""
+    history: Annotated[list[dict[str, str]], turn_scoped]
+    """本轮带进上下文的对话。**每轮由 runtime 从数据库重新加载**，
+    不靠 state 累积——否则同一会话跑两轮，历史会被拼两遍。"""
     summary: str
     """压缩后的历史摘要，替代被丢弃的中段。"""
 
@@ -75,8 +111,8 @@ class RampState(TypedDict, total=False):
 
     # ---- Agent 循环 ----
     step: int
-    tool_calls: Annotated[list[dict[str, Any]], operator.add]
-    observations: Annotated[list[dict[str, Any]], operator.add]
+    tool_calls: Annotated[list[dict[str, Any]], turn_scoped]
+    observations: Annotated[list[dict[str, Any]], turn_scoped]
 
     # ---- 人机协同 ----
     pending_action: dict[str, Any] | None

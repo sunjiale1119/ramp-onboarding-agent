@@ -19,7 +19,7 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
-from . import config, escalate, knowledge, llm, prompts, trace
+from . import compact, config, escalate, knowledge, llm, prompts, trace
 from .state import RampState
 from .tools import registry
 
@@ -68,6 +68,7 @@ def _make_answer(domain: str):
         bundle = prompts.build(
             domain=domain,
             session_block=state.get("_session_block"),
+            history=_history(state),
             task_block=task,
         )
         with trace.span("answer", sid, state.get("step", 0), domain=domain) as sp:
@@ -139,6 +140,7 @@ def _make_advice(domain: str):
         bundle = prompts.build(
             domain=domain,
             session_block=state.get("_session_block"),
+            history=_history(state),
             task_block=task,
         )
         with trace.span("advice", sid, state.get("step", 0), domain=domain) as sp:
@@ -228,7 +230,7 @@ def _make_escalate(domain: str):
             mentor=mentor_name,
             hints="\n".join(f"- {h}" for h in state.get("hints", [])) or "- （无）",
         )
-        bundle = prompts.build(domain=domain, task_block=task)
+        bundle = prompts.build(domain=domain, history=_history(state), task_block=task)
         with trace.span("escalate", sid, state.get("step", 0), domain=domain) as sp:
             res = llm.chat(bundle.messages, tier="tier2", task="escalate", max_tokens=1400)
             trace.record_llm(sp, res)
@@ -266,6 +268,7 @@ def _make_act(domain: str):
         messages = prompts.build(
             domain=domain,
             session_block=state.get("_session_block"),
+            history=_history(state),
             task_block=state["question"],
         ).messages
 
@@ -418,6 +421,28 @@ def _make_execute(domain: str):
 
 
 # ------------------------------------------------------------------ 组装
+def _history(state: RampState) -> list[dict[str, str]]:
+    """给生成节点用的对话历史，**超预算就压缩**。
+
+    带历史是为了让指代句能被理解；压缩是因为 30 天的会话不可能全塞进去。
+    这两件事必须一起做 —— 只做第一件，成本随轮数线性涨；
+    只做第二件，等于没有上下文。
+    """
+    hist = state.get("history") or []
+    if not hist:
+        return []
+    need, _ = compact.should_compact(hist)
+    if not need:
+        return hist
+    # compact() 返回的是一个报告 dict（含 history / summary / saved_tokens / span），
+    # 不是 history 本身 —— 这里只取 history。压缩失败时退回原历史，
+    # **宁可贵一点也不能把上下文弄丢**。
+    try:
+        return compact.compact(hist, session_id=state.get("session_id", ""))["history"]
+    except Exception:  # noqa: BLE001
+        return hist
+
+
 def _route_entry(state: RampState) -> str:
     return "act" if state.get("route") == "act" else "retrieve"
 

@@ -73,9 +73,19 @@ def classify(state: RampState) -> dict[str, Any]:
     58% 请求进 Agent 循环的浪费——这是分层响应的收益来源。"""
     sid = state["session_id"]
     task = prompts.CLASSIFY.format(question=state["question"])
+
+    # 分类必须看历史，否则指代句无从判断。
+    # 「那我的有没有交？」单独看是一句没有主语的话 —— 模型只能瞎猜，
+    # 猜错了后面整条链路都错。带上最近两轮就够：再多既没用也在烧 token。
+    msgs: list[dict[str, str]] = []
+    for m in (state.get("history") or [])[-4:]:
+        msgs.append({"role": m["role"], "content": m["content"][:400]})
+    msgs.append({"role": "user", "content": task})
+
     with trace.span("classify", sid, 0) as sp:
+        sp.detail["history_turns"] = len(msgs) - 1
         data, res = llm.chat_json(
-            [{"role": "user", "content": task}],
+            msgs,
             tier="tier2",
             task="classify",   # 关闭思考：结构化 JSON 不需要推理，更快更便宜
             fallback=_FALLBACK,

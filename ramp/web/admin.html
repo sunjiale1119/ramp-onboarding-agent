@@ -9,30 +9,31 @@
 <body>
 <div class="page">
   <div class="head2">
-    <div><h2>管理后台</h2><div class="sub">账号与授权 · 知识库 · 系统状态</div></div>
-    <div class="vm"><span>账号 <b id="ad-users">–</b></span><span>在线会话 <b id="ad-sess">–</b></span></div>
+    <div><h2>管理后台</h2><div class="sub">成员 · 知识库 · 系统</div></div>
+    <div class="vm"><span>成员 <b id="ad-users">–</b></span><span>在线会话 <b id="ad-sess">–</b></span></div>
   </div>
 
-  <div class="tabs" style="max-width:560px" role="tablist">
-    <button role="tab" aria-selected="true" data-pane="u">用户与授权 <span id="u-badge"></span></button>
+  <div class="tabs" style="max-width:480px" role="tablist">
+    <button role="tab" aria-selected="true" data-pane="u">成员 <span id="u-badge"></span></button>
     <button role="tab" aria-selected="false" data-pane="k">知识库</button>
-    <button role="tab" aria-selected="false" data-pane="e">员工档案</button>
     <button role="tab" aria-selected="false" data-pane="x">外部系统</button>
     <button role="tab" aria-selected="false" data-pane="s">系统</button>
   </div>
 
-  <!-- ---------------- 用户 ---------------- -->
+  <!-- ---------------- 成员 ---------------- -->
   <div class="pane on" data-pane="u"><div class="shell"><div class="pad">
-    <div class="note" style="margin-bottom:14px"><span class="nt">管理员能做什么 / 不能做什么</span>
-      能：<b>激活账号、分配角色、绑定员工档案、重置密码、删除账号</b>。<br>
-      不能：<b>看新人的提问原文</b>。管理员权限管的是"账号和配置"，不是"绕过可见性矩阵"——
-      这两件事经常被混为一谈，很多系统里 admin 等于上帝。<br>
-      <span style="color:var(--ink3)">你现在的 views 是 <code id="my-views"></code>，里面<b>没有 newbie</b>。
-      直接开新人的 memory 接口，服务端照样 403。</span>
+    <div class="note" style="margin-bottom:14px"><span class="nt">怎么加一个人</span>
+      对方在登录页<b>自助注册</b>（新账号是待激活状态，登不进来）→
+      你在下面点<b>「设置」</b>，一次填完角色、团队、岗位、入职日期、Mentor →
+      点<b>激活</b>。他就能用了。
+      <br><br>
+      <span style="color:var(--ink3)">管理员能做的是<b>账号与配置</b>，
+      <b>看不到任何人的提问原文</b>——你现在的 views 是 <code id="my-views"></code>，
+      里面没有 <code>newbie</code>。直接开新人的 memory 接口，服务端照样 403。</span>
     </div>
     <div class="tw"><table class="utab" id="u-tab"></table></div>
-    <p class="hint" style="margin-top:10px">改角色 / 改 employee_id 后要点「保存」才生效。
-      停用会<b>同时踢掉该账号的在线会话</b>，不是等它自然过期——否则停用只是个摆设。</p>
+    <p class="hint" style="margin-top:10px">停用会<b>同时踢掉该账号的在线会话</b>，
+      不是等它自然过期——否则停用只是个摆设。</p>
   </div></div></div>
 
   <!-- ---------------- 知识库 ---------------- -->
@@ -46,11 +47,11 @@
         <div class="kbform">
           <div><label>域</label><select id="k-domain">
             <option value="hr">hr · 人事制度</option>
-            <option value="eng">eng · 研发流程</option>
-            <option value="biz">biz · 业务知识</option>
+            <option value="it">it · IT 与权限</option>
+            <option value="biz">biz · 业务与研发</option>
           </select></div>
           <div><label>问题</label><input id="k-question" placeholder="新人会怎么问这件事"></div>
-          <div><label>答案</label><textarea id="k-answer" placeholder="回答。写得具体一点——检索命中后原文会直接进上下文"></textarea></div>
+          <div><label>答案</label><textarea id="k-answer" placeholder="回答。写具体一点——检索命中后原文会直接进上下文"></textarea></div>
           <div class="kbrow">
             <div><label>来源等级</label><select id="k-level">
               <option value="L1">L1 · 制度原文</option>
@@ -70,99 +71,34 @@
         </div>
         <div class="note" style="margin-top:12px"><span class="nt">保存会做两件事</span>
           写库 + <b>立刻重算这条的向量并重建索引</b>。<br>
-          少了第二步，管理员改完在前台搜不到，会以为没生效——
-          而实际上库里已经改了，只是检索还在用旧索引。<b>这种"改了但看不见"最难查。</b></div>
+          少了第二步，改完在前台搜不到，会以为没生效——
+          而库里其实已经改了，只是检索还在用旧索引。<b>这种"改了但看不见"最难查。</b></div>
         <div class="note" style="margin-top:10px"><span class="nt">L3 是干什么用的</span>
-          L3 打了 <b>0.75 的乘法上限</b>，结构上过不了 0.62 的作答阈值——
-          录进去不是为了让它直接回答，是为了让它<b>能被检索到、然后触发升级</b>。
+          L3 的分数上限是 <b>0.45</b>，作答阈值 0.62——<b>结构上过不了</b>。
+          录进去不是为了让它直接回答，是为了让它<b>能被检索到、然后触发升级给 Mentor</b>。
           过期条目同理。</div>
       </div>
     </div>
   </div></div></div>
 
-  <!-- ---------------- 系统 ---------------- -->
-  <!-- ---------------- 员工档案 ---------------- -->
-  <div class="pane" data-pane="e"><div class="shell"><div class="pad adm">
-    <div>
-      <div class="note" style="margin-bottom:14px"><span class="nt">档案和账号是两件事</span>
-        <b>账号</b>回答"你是谁、能进哪个页面"；<b>档案</b>回答"你哪天入职、谁带你、在哪个组"。<br>
-        新人注册后需要两步：在「用户与授权」里<b>激活并派角色</b>，再在这里<b>建一份档案并绑定</b>——
-        没有档案，新人工作台打不开，30 天时间线和主动推送都无从谈起。
-      </div>
-      <div id="e-list"></div>
-    </div>
-    <div>
-      <div class="pnl"><div class="pl"><span id="e-mode">新建档案</span><span id="e-id2"></span></div>
-        <div class="kbform">
-          <div><label>员工 ID</label><input id="e-id" placeholder="e_zhangsan（建档后不可改）"></div>
-          <div><label>姓名</label><input id="e-name" placeholder="张三"></div>
-          <div class="kbrow">
-            <div><label>团队</label><input id="e-team" placeholder="数据组"></div>
-            <div><label>岗位</label><input id="e-role" placeholder="后端工程师"></div>
-          </div>
-          <div class="kbrow">
-            <div><label>域</label><select id="e-domain"></select></div>
-            <div><label>入职日期</label><input id="e-onboard" type="date"></div>
-          </div>
-          <div><label>Mentor</label><select id="e-mentor"></select></div>
-          <div id="e-mentor-new" style="display:none">
-            <div class="kbrow">
-              <div><label>Mentor ID</label><input id="e-mid" placeholder="m_lisi"></div>
-              <div><label>Mentor 姓名</label><input id="e-mname" placeholder="李四"></div>
-            </div>
-          </div>
-          <div style="display:flex;gap:8px;margin-top:4px">
-            <button class="btn pri" id="e-save">保存</button>
-            <button class="btn" id="e-new">清空 / 新建</button>
-          </div>
-        </div>
-        <div class="note" style="margin-top:12px"><span class="nt">保存时顺带做的事</span>
-          写入三条<b>语义记忆</b>（岗位 / Mentor / 入职日期）。新人工作台右栏那个
-          「Ramp 记得关于我的」读的就是这三条 —— 不写的话新人第一次打开看到的是空的。<br>
-          bootstrap 灌种子时做了这件事，<b>手工建档案也必须做</b>，否则两条路径产出的数据不一致。</div>
-      </div>
-    </div>
-  </div></div></div>
-
-  <!-- ---------------- 外部系统（只读） ---------------- -->
+  <!-- ---------------- 外部系统 ---------------- -->
   <div class="pane" data-pane="x"><div class="shell"><div class="pad">
-    <div class="note warn" style="margin-bottom:16px"><span class="nt">只读 · Ramp 不拥有这些数据</span>
-      有人提权限工单，Agent 回答「审批人<b>李敏</b>（数据平台负责人）」，
-      管理员翻遍后台却<b>找不到李敏这个人</b> —— 看起来像 Agent 编的。<br><br>
-      李敏确实存在，只是存在于<b>另一个地方</b>。系统里的「人」分散在四处：<br>
-      <code>employees</code> 表（新人档案）· <code>mentor_*</code> 字段（Mentor）·
-      <b>外部组织架构</b>（leader / HRBP / 行政）· <b>IT 服务台</b>（各资源审批人）。<br>
-      前两处在「员工档案」页管，<b>后两处就是这一页</b>。<br><br>
-      <b>为什么不把李敏也塞进员工表：</b>那会把只读的外部数据变成 Ramp 自己的。
-      真实部署里组织架构和工单系统是企业已有的，Ramp 只读访问、不负责维护 ——
-      <b>谁拥有数据，谁负责它的正确性</b>。所以这一页改不了，要改去源系统改。
+    <div class="note warn" style="margin-bottom:16px"><span class="nt">全部未接入 · 这是刻意的</span>
+      Ramp 有四个工具要读企业<b>已有</b>的系统。演示环境一个都没接。<br><br>
+      这里原来塞了一整套虚构数据：某人的社保状态、某人的权限清单、
+      一个叫「李敏」的审批人。Agent 答得很流畅，直到有人去后台核对——
+      <b>系统里根本没有李敏这个人</b>。<br><br>
+      现在清空了。工具查不到时会<b>说清楚查的是哪个系统、为什么查不到</b>，
+      不会编。<b>一个诚实的「我查不到」，比一个编出来的答案有用得多</b>——
+      前者你知道下一步做什么，后者你会照着错的信息去办事。
     </div>
-
-    <div class="grid g2">
-      <div>
-        <h3 style="font-size:15px;margin:0 0 10px">出现在 Agent 回答里的人</h3>
-        <div class="tw"><table id="x-people"></table></div>
-      </div>
-      <div>
-        <h3 style="font-size:15px;margin:0 0 10px">资源审批人 · IT 服务台</h3>
-        <div class="tw"><table id="x-appr"></table></div>
-      </div>
-    </div>
-
-    <div class="grid g2" style="margin-top:16px">
-      <div>
-        <h3 style="font-size:15px;margin:0 0 10px">组织架构</h3>
-        <div class="tw"><table id="x-org"></table></div>
-      </div>
-      <div>
-        <h3 style="font-size:15px;margin:0 0 10px">常用联系人</h3>
-        <div class="tw"><table id="x-contacts"></table></div>
-      </div>
-    </div>
-
+    <div class="tw"><table id="x-sys"></table></div>
+    <h3 style="font-size:15px;margin:22px 0 10px">已注册的工具</h3>
+    <div class="tw"><table id="x-tools"></table></div>
     <p class="hint" style="margin-top:12px" id="x-note"></p>
   </div></div></div>
 
+  <!-- ---------------- 系统 ---------------- -->
   <div class="pane" data-pane="s"><div class="shell"><div class="pad">
     <div class="grid g3" id="s-kpi"></div>
     <div class="grid g2" style="margin-top:14px">
@@ -174,73 +110,124 @@
         <div class="pnl" id="s-ls" style="margin-top:14px"></div>
         <div class="pnl" style="margin-top:14px"><div class="pl"><span>在线会话</span><span>可撤销</span></div>
           <div class="tw" style="border:0"><table id="s-sess"></table></div>
-          <p class="hint" style="margin-top:9px">会话存在库里而不是签名 token。JWT 那种签完就撤不回来——
-            登出之后串还是有效的，只是客户端把它丢了。<b>对一个承诺"记忆可删"的产品，登出必须真的失效。</b></p></div>
+          <p class="hint" style="margin-top:9px">会话存库而不是签名 token。JWT 那种签完就撤不回来——
+            登出之后串还是有效的，只是客户端把它丢了。<b>对一个承诺「记忆可删」的产品，登出必须真的失效。</b></p></div>
       </div>
     </div>
   </div></div></div>
 </div>
 
+<!-- 设置成员：一个弹窗填完所有 -->
+<div class="back" id="back" role="dialog" aria-modal="true"><div class="modal" style="max-width:520px">
+  <div class="mh" style="background:var(--accent-soft)">
+    <b id="m-title" style="color:var(--accent-ink)">设置成员</b>
+    <p id="m-sub">角色决定他能进哪个页面；入职信息决定 30 天时间线怎么走。</p>
+  </div>
+  <div class="mb">
+    <div class="kbform">
+      <div class="kbrow">
+        <div><label>姓名</label><input id="m-name"></div>
+        <div><label>角色</label><select id="m-role"></select></div>
+      </div>
+      <div id="m-onboard-fields">
+        <div class="kbrow">
+          <div><label>团队</label><input id="m-team" placeholder="数据组"></div>
+          <div><label>岗位</label><input id="m-title" placeholder="后端工程师"></div>
+        </div>
+        <div class="kbrow">
+          <div><label>入职日期</label><input id="m-onboard" type="date"></div>
+          <div><label>领域</label><select id="m-domain"></select></div>
+        </div>
+        <div id="m-mentor-wrap"><label>Mentor</label><select id="m-mentor"></select></div>
+      </div>
+      <p class="hint" id="m-hint" style="margin:0"></p>
+    </div>
+  </div>
+  <div class="mf">
+    <span class="hint" style="margin-right:auto" id="m-who"></span>
+    <button class="btn" id="m-cancel">取消</button>
+    <button class="btn pri" id="m-save">保存</button>
+  </div>
+</div></div>
+
 <script src="/_shared.js"></script>
 <script>
-let ME = null, ROLES = [], KB = [], editing = null;
-let EMPS = [], MENTORS = [], DOMAINS = [], eEditing = null;
+let ME = null, ROLES = [], MENTORS = [], DOMAINS = [], DOMAIN_LABEL = {},
+    USERS = [], KB = [], editing = null, mUser = null;
 
 $$('.tabs button').forEach(function (b) {
   b.onclick = function () {
     $$('.tabs button').forEach(function (x) { x.setAttribute('aria-selected', String(x === b)); });
     $$('.pane').forEach(function (p) { p.classList.toggle('on', p.dataset.pane === b.dataset.pane); });
     if (b.dataset.pane === 'k' && !KB.length) loadKB();
-    if (b.dataset.pane === 'e') loadEmployees();
     if (b.dataset.pane === 'x') loadExternal();
     if (b.dataset.pane === 's') loadSystem();
   };
 });
 
-/* ---------------- 用户 ---------------- */
+/* ---------------- 成员 ---------------- */
 
-/** 绑定的那份档案是谁。
+/** 一行里把"这个人配好了没有"说清楚。
  *
- *  只显示一个 `e_zhouyu`，管理员没法判断绑对没有。绑定关系决定了
- *  这个账号能读**谁的**提问原文——绑错就等于把别人的私密提问
- *  交到这个人手里，而 own_employee() 那道防线比对的正是这条绑定，
- *  所以它不会报警，只会一本正经地放行。**这一栏不是装饰。**
+ *  以前这里是一个自由文本框，要管理员手打 employee_id 去绑一份"员工档案"。
+ *  账号和档案是两张表、两个页面、四个步骤 —— 而在这个产品里
+ *  两者从来都是一一对应的，那个多对多关系根本不存在。
+ *  现在员工 id 就是用户名，绑定这个概念消失了。
  */
-function bindNote(u) {
-  if (!u.employee_id) {
-    return '<div class="bind hint">未绑定 · 打不开新人工作台</div>';
+function statusCell(u) {
+  if (!u.active) {
+    return '<span class="pill off">待激活</span>';
   }
-  if (u.binding_missing) {
-    return '<div class="bind bad">⚠ 查无此档案 —— 这个账号打不开工作台</div>';
+  if (u.needs_onboard) {
+    return '<span class="pill off">缺入职日期</span>' +
+      '<div class="bind bad">没有入职日期，30 天时间线和主动推送都跑不起来</div>';
   }
-  const who = esc(u.employee_name) + '<span class="sub2i"> · ' + esc(u.employee_team || '') + '</span>';
-  if (u.name_mismatch) {
-    return '<div class="bind warn">⚠ 绑的是 <b>' + who + '</b><br>' +
-      '档案名和账号名「' + esc(u.display_name) + '」对不上，确认没绑错人</div>';
+  if (u.mentor_missing) {
+    return '<span class="pill on">已激活</span>' +
+      '<div class="bind bad">Mentor 指向一个已删除的账号</div>';
   }
-  return '<div class="bind ok">' + who + '</div>';
+  return '<span class="pill on">已激活</span>';
+}
+
+function onboardCell(u) {
+  if (u.role !== 'newbie' && u.role !== 'mentor') {
+    return '<span class="hint">—</span>';
+  }
+  var bits = [];
+  if (u.team || u.title) {
+    bits.push(esc([u.team, u.title].filter(Boolean).join(' · ')));
+  }
+  if (u.onboard_date) {
+    bits.push('入职 ' + esc(u.onboard_date) +
+      (u.day_index != null ? '（第 ' + u.day_index + ' 天）' : ''));
+  }
+  if (u.mentor_name) {
+    bits.push('Mentor ' + esc(u.mentor_name));
+  } else if (u.role === 'newbie') {
+    bits.push('<span style="color:var(--warn)">未分配 Mentor</span>');
+  }
+  return bits.length ? '<div style="font-size:12.5px;line-height:1.7">' +
+    bits.join('<br>') + '</div>' : '<span class="hint">未填</span>';
 }
 
 function renderUsers(users) {
-  ROLES = ROLES.length ? ROLES : ['newbie', 'mentor', 'hr', 'ops', 'admin'];
-  const pending = users.filter(function (u) { return !u.active; }).length;
+  USERS = users;
+  var pending = users.filter(function (u) { return !u.active; }).length;
   $('#u-badge').textContent = pending ? '· ' + pending + ' 待激活' : '';
   $('#ad-users').textContent = users.length;
   $('#u-tab').innerHTML =
-    '<thead><tr><th>账号</th><th>姓名</th><th>角色</th><th>员工档案</th><th>状态</th><th>操作</th></tr></thead><tbody>' +
+    '<thead><tr><th>账号</th><th>姓名</th><th>角色</th><th>入职信息</th>' +
+    '<th>状态</th><th>操作</th></tr></thead><tbody>' +
     users.map(function (u) {
-      const self = u.username === ME.username;
-      const opts = ROLES.map(function (r) {
-        return '<option value="' + r + '"' + (r === u.role ? ' selected' : '') + '>' + r + '</option>';
-      }).join('');
+      var self = u.username === ME.username;
       return '<tr data-u="' + esc(u.username) + '">' +
         '<td class="n">' + esc(u.username) + (self ? ' <span class="hint">(你)</span>' : '') + '</td>' +
         '<td>' + esc(u.display_name) + '</td>' +
-        '<td><select data-f="role">' + opts + '</select></td>' +
-        '<td>' + empSelect(u) + bindNote(u) + '</td>' +
-        '<td><span class="pill ' + (u.active ? 'on' : 'off') + '">' + (u.active ? '已激活' : '待激活') + '</span></td>' +
+        '<td>' + esc(u.role_label) + '</td>' +
+        '<td>' + onboardCell(u) + '</td>' +
+        '<td>' + statusCell(u) + '</td>' +
         '<td style="white-space:nowrap">' +
-          '<button class="mini" data-act="save">保存</button> ' +
+          '<button class="mini" data-act="edit">设置</button> ' +
           '<button class="mini" data-act="toggle">' + (u.active ? '停用' : '激活') + '</button> ' +
           '<button class="mini" data-act="pw">改密</button> ' +
           '<button class="mini danger" data-act="del">删除</button>' +
@@ -250,254 +237,153 @@ function renderUsers(users) {
 
 async function loadUsers() {
   try {
-    const d = await api('/admin/users');
+    var d = await api('/admin/users');
     ROLES = d.roles || ROLES;
+    MENTORS = d.mentors || [];
+    DOMAINS = d.domains || ['hr', 'it', 'biz'];
+    DOMAIN_LABEL = d.domain_label || {};
     renderUsers(d.users);
-  } catch (e) { $('#u-tab').innerHTML = '<tbody><tr><td class="err">' + esc(e.message) + '</td></tr></tbody>'; }
+  } catch (e) {
+    $('#u-tab').innerHTML = '<tbody><tr><td class="err">' + esc(e.message) + '</td></tr></tbody>';
+  }
 }
 
+/* ---- 设置弹窗 ---- */
+function openEdit(u) {
+  mUser = u;
+  $('#m-title').value = u.title || '';
+  $('#m-name').value = u.display_name || '';
+  $('#m-team').value = u.team || '';
+  $('#m-onboard').value = u.onboard_date || '';
+  $('#m-who').textContent = u.username;
+  $('#m-role').innerHTML = ROLES.map(function (r) {
+    return '<option value="' + r + '"' + (r === u.role ? ' selected' : '') + '>' + r + '</option>';
+  }).join('');
+  $('#m-domain').innerHTML = DOMAINS.map(function (x) {
+    return '<option value="' + x + '"' + (x === u.domain ? ' selected' : '') + '>' +
+      x + ' · ' + esc(DOMAIN_LABEL[x] || x) + '</option>';
+  }).join('');
+  $('#m-mentor').innerHTML = '<option value="">— 暂不分配 —</option>' +
+    MENTORS.filter(function (m) { return m.username !== u.username; })
+      .map(function (m) {
+        return '<option value="' + esc(m.username) + '"' +
+          (m.username === u.mentor ? ' selected' : '') + '>' +
+          esc(m.display_name) + '（' + esc(m.username) + '）</option>';
+      }).join('');
+  $('#m-role').onchange();
+  $('#back').classList.add('on');
+}
+
+$('#m-role').onchange = function () {
+  var r = $('#m-role').value;
+  var needs = (r === 'newbie' || r === 'mentor');
+  $('#m-onboard-fields').style.display = needs ? '' : 'none';
+  $('#m-mentor-wrap').style.display = (r === 'newbie') ? '' : 'none';
+  var hints = {
+    newbie: '新人：必须填入职日期，否则 30 天时间线和主动推送跑不起来。',
+    mentor: 'Mentor：会出现在新人的 Mentor 下拉里，并能看到自己带的人的卡点信号。',
+    hr: 'HR：只能看部门级聚合，同批人数少于 3 时连占比都不显示。',
+    ops: '运营：能看调用链、评测报告和人工复核，看不到提问原文。',
+    admin: '管理员：管账号和配置，<b>看不到任何人的提问原文</b>。'
+  };
+  $('#m-hint').innerHTML = hints[r] || '';
+};
+
+$('#m-cancel').onclick = function () { $('#back').classList.remove('on'); };
+$('#back').onclick = function (e) { if (e.target === $('#back')) $('#back').classList.remove('on'); };
+
+$('#m-save').onclick = async function () {
+  if (!mUser) return;
+  var role = $('#m-role').value;
+  var body = {
+    username: mUser.username,
+    display_name: $('#m-name').value.trim(),
+    role: role
+  };
+  if (role === 'newbie' || role === 'mentor') {
+    body.team = $('#m-team').value.trim();
+    body.title = $('#m-title').value.trim();
+    body.domain = $('#m-domain').value;
+    body.onboard_date = $('#m-onboard').value;
+    body.mentor = (role === 'newbie') ? $('#m-mentor').value : '';
+    if (!body.onboard_date) { toast('新人和 Mentor 必须填入职日期'); return; }
+  }
+  $('#m-save').disabled = true;
+  try {
+    var r = await api('/admin/users/update', j('POST', body));
+    toast(r.message);
+    MENTORS = r.mentors || MENTORS;
+    renderUsers(r.users);
+    $('#back').classList.remove('on');
+  } catch (x) { toast(x.message); }
+  $('#m-save').disabled = false;
+};
+
 $('#u-tab').onclick = async function (e) {
-  const b = e.target.closest('[data-act]'); if (!b) return;
-  const tr = b.closest('[data-u]'), username = tr.dataset.u, act = b.dataset.act;
-  const body = { username: username };
-  if (act === 'save') {
-    body.role = tr.querySelector('[data-f=role]').value;
-    body.employee_id = tr.querySelector('[data-f=employee_id]').value.trim();
-  } else if (act === 'toggle') {
-    body.active = tr.querySelector('.pill').classList.contains('off');
+  var b = e.target.closest('[data-act]'); if (!b) return;
+  var tr = b.closest('[data-u]'), username = tr.dataset.u, act = b.dataset.act;
+  var u = USERS.find(function (x) { return x.username === username; });
+
+  if (act === 'edit') { openEdit(u); return; }
+
+  var body = { username: username };
+  if (act === 'toggle') {
+    body.active = !u.active;
+    if (body.active && (u.role === 'newbie' || u.role === 'mentor') && !u.onboard_date) {
+      toast('先点「设置」填入职日期，再激活'); openEdit(u); return;
+    }
   } else if (act === 'pw') {
-    const pw = prompt('给 ' + username + ' 设置新密码（至少 8 位）。\n注意：改密会踢掉该账号所有在线会话。');
+    var pw = prompt('给 ' + username + ' 设置新密码（至少 8 位）。改密会踢掉他所有在线会话。');
     if (!pw) return;
     body.new_password = pw;
   } else if (act === 'del') {
-    if (!confirm('删除账号 ' + username + '？\n\n这只删账号，不删他的员工档案和记忆——那两样归业务数据管。')) return;
+    if (!confirm('删除 ' + username + '？\n\n会连同他的档案与全部记忆一起删掉，不可恢复。')) return;
   }
   try {
-    const r = await api(act === 'del' ? '/admin/users/delete' : '/admin/users/update', j('POST', body));
+    var r = await api(act === 'del' ? '/admin/users/delete' : '/admin/users/update', j('POST', body));
     toast(r.message);
+    if (r.mentors) MENTORS = r.mentors;
     renderUsers(r.users);
   } catch (x) { toast(x.message); }
 };
 
-/* ---------------- 外部系统（只读） ---------------- */
-
-/** 把外部系统里的人和审批配置摆出来，让 Agent 说的话可核对。
- *
- *  这一页解决的是一个具体的困惑：Agent 说"审批人李敏"，
- *  管理员在后台找不到李敏，于是怀疑 Agent 在编。
- *  实际上李敏在 IT 服务台的审批人配置里 —— 只是那份数据以前没有任何入口能看。
- *
- *  **可核对性本身就是产品功能**：一个会说人名的 Agent，
- *  必须让人能查到那个人是谁、依据是什么。
- */
+/* ---------------- 外部系统 ---------------- */
 async function loadExternal() {
   try {
     var d = await api('/admin/external');
-
-    $('#x-people').innerHTML =
-      '<thead><tr><th>姓名</th><th>身份</th><th>出现在哪</th></tr></thead><tbody>' +
-      d.people.map(function (x) {
-        return '<tr><td><b>' + esc(x.name) + '</b></td><td>' +
-          x.roles.map(function (r) { return '<span class="pill on">' + esc(r) + '</span>'; }).join(' ') +
-          '</td><td style="font-size:12.5px;color:var(--ink3)">' +
-          x.context.map(esc).join('<br>') + '</td></tr>';
+    $('#x-sys').innerHTML =
+      '<thead><tr><th>系统</th><th>Ramp 从它读什么</th><th>对应工具</th><th>状态</th></tr></thead><tbody>' +
+      d.systems.map(function (x) {
+        return '<tr><td><b>' + esc(x.name) + '</b></td>' +
+          '<td style="font-size:13px">' + esc(x.reads) + '</td>' +
+          '<td class="n">' + esc(x.tool) + '</td>' +
+          '<td>' + (x.connected ? '<span class="pill on">已接入</span>'
+                                : '<span class="pill off">未接入</span>') + '</td></tr>';
       }).join('') + '</tbody>';
 
-    $('#x-appr').innerHTML =
-      '<thead><tr><th>资源</th><th>审批人</th><th>SLA</th></tr></thead><tbody>' +
-      d.approvers.map(function (a) {
-        return '<tr><td class="n">' + esc(a.resource) + '</td>' +
-          '<td>' + esc(a.name) + '<br><span class="hint">' + esc(a.title || '') + '</span></td>' +
-          '<td class="n">' + (a.sla_days != null ? a.sla_days + ' 个工作日' : '—') +
-          (a.extra_review ? '<br><span class="hint">+' + esc(a.extra_review) + '</span>' : '') +
-          '</td></tr>';
+    $('#x-tools').innerHTML =
+      '<thead><tr><th>工具</th><th>可见域</th><th>写操作</th></tr></thead><tbody>' +
+      d.tools.map(function (t) {
+        return '<tr><td class="n">' + esc(t.name) + '</td>' +
+          '<td>' + t.domains.map(esc).join(' · ') + '</td>' +
+          '<td>' + (t.writes
+            ? '<span class="pill off">是 · 执行前必须人工确认</span>'
+            : '<span class="pill on">否 · 只读</span>') + '</td></tr>';
       }).join('') + '</tbody>';
-
-    $('#x-org').innerHTML =
-      '<thead><tr><th>员工</th><th>团队 / 岗位</th><th>职级</th><th>Leader</th></tr></thead><tbody>' +
-      d.org.map(function (o) {
-        return '<tr><td class="n">' + esc(o.employee_id) + '</td>' +
-          '<td>' + esc(o.team || '') + ' · ' + esc(o.role || '') + '</td>' +
-          '<td class="n">' + esc(o.level || '—') + '</td>' +
-          '<td>' + esc(o.leader || '—') + '</td></tr>';
-      }).join('') + '</tbody>';
-
-    $('#x-contacts').innerHTML =
-      '<thead><tr><th>角色</th><th>姓名</th><th>联系方式</th></tr></thead><tbody>' +
-      d.contacts.map(function (c) {
-        return '<tr><td class="n">' + esc(c.key) + '</td><td>' + esc(c.name || '') +
-          '</td><td style="font-size:12.5px">' + esc(c.channel || '') + '</td></tr>';
-      }).join('') + '</tbody>';
-
-    $('#x-note').innerHTML = esc(d.note) + '　数据源：<code>' + esc(d.source) + '</code>';
+    $('#x-note').textContent = d.note;
   } catch (e) {
-    $('#x-people').innerHTML = '<tbody><tr><td class="err">' + esc(e.message) + '</td></tr></tbody>';
+    $('#x-sys').innerHTML = '<tbody><tr><td class="err">' + esc(e.message) + '</td></tr></tbody>';
   }
 }
-
-/* ---------------- 员工档案 ---------------- */
-
-/** 账号表里的档案选择器。
- *
- *  原来这里是个自由文本框，要管理员手打 `e_zhangsan`。
- *  **让人手打一个必须精确匹配的外键，本身就是错误设计** —— 打错一个字母，
- *  轻则这个账号打不开工作台，重则绑到别人的档案上读到别人的提问原文。
- *  改成下拉之后，能选的都是真实存在、且没被别人占用的档案。
- */
-function empSelect(u) {
-  var opts = ['<option value="">— 未绑定 —</option>'];
-  EMPS.forEach(function (e) {
-    if (e.bound_to && e.bound_to !== u.username) return;
-    opts.push('<option value="' + esc(e.id) + '"' +
-      (e.id === u.employee_id ? ' selected' : '') + '>' +
-      esc(e.name) + ' · ' + esc(e.team) + '</option>');
-  });
-  MENTORS.forEach(function (m) {
-    if (m.bound_to && m.bound_to !== u.username) return;
-    opts.push('<option value="' + esc(m.id) + '"' +
-      (m.id === u.employee_id ? ' selected' : '') + '>' +
-      esc(m.name) + ' · Mentor</option>');
-  });
-  var known = EMPS.some(function (e) { return e.id === u.employee_id; }) ||
-              MENTORS.some(function (m) { return m.id === u.employee_id; });
-  if (u.employee_id && !known) {
-    opts.push('<option value="' + esc(u.employee_id) + '" selected>' +
-      esc(u.employee_id) + '（查无此档案）</option>');
-  }
-  return '<select data-f="employee_id">' + opts.join('') + '</select>';
-}
-
-function renderEmployees() {
-  $('#e-list').innerHTML = EMPS.length ? EMPS.map(function (e) {
-    var owner = e.bound_to
-      ? '<span style="color:var(--good)">账号 ' + esc(e.bound_to) + '</span>'
-      : '<span style="color:var(--warn)">未绑定账号</span>';
-    return '<div class="kbitem"><b>' + esc(e.name) + '</b>' +
-      '<span style="color:var(--ink3)"> · ' + esc(e.team) + ' ' + esc(e.role) + '</span><br>' +
-      '<span style="color:var(--ink2)">入职 ' + esc(e.onboard_date) +
-      '（第 ' + e.day_index + ' 天）· Mentor ' + esc(e.mentor_name || '未分配') + '</span>' +
-      '<div class="meta"><span>' + esc(e.id) + '</span><span>' + esc(e.domain) + '</span>' +
-      owner + '<span style="margin-left:auto"></span>' +
-      '<button data-eedit="' + esc(e.id) + '">编辑</button>' +
-      '<button data-edel="' + esc(e.id) + '">删除</button></div></div>';
-  }).join('') : '<p class="hint">还没有任何员工档案。在右侧新建一份。</p>';
-}
-
-function fillEmpForm(e) {
-  eEditing = e ? e.id : null;
-  $('#e-mode').textContent = e ? '编辑档案' : '新建档案';
-  $('#e-id2').textContent = e ? e.id : '';
-  $('#e-id').value = e ? e.id : '';
-  $('#e-id').disabled = !!e;
-  $('#e-name').value = e ? e.name : '';
-  $('#e-team').value = e ? e.team : '';
-  $('#e-role').value = e ? e.role : '';
-  $('#e-domain').value = e ? e.domain : 'biz';
-  $('#e-onboard').value = e ? e.onboard_date : new Date().toISOString().slice(0, 10);
-  var known = e && e.mentor_id &&
-    MENTORS.some(function (m) { return m.id === e.mentor_id; });
-  $('#e-mentor').value = known ? e.mentor_id : (e && e.mentor_id ? '__new__' : '');
-  $('#e-mentor').onchange();
-  $('#e-mid').value = (e && !known && e.mentor_id) ? e.mentor_id : '';
-  $('#e-mname').value = (e && !known && e.mentor_name) ? e.mentor_name : '';
-}
-
-async function loadEmployees() {
-  try {
-    var d = await api('/admin/employees');
-    EMPS = d.employees || [];
-    DOMAINS = d.domains || ['hr', 'it', 'biz'];
-    var bound = {};
-    (await api('/admin/users')).users.forEach(function (u) {
-      if (u.employee_id) bound[u.employee_id] = u.username;
-    });
-    MENTORS = (d.mentors || []).map(function (m) {
-      return { id: m.id, name: m.name, bound_to: bound[m.id] };
-    });
-
-    $('#e-domain').innerHTML = DOMAINS.map(function (x) {
-      return '<option value="' + x + '">' + x + ' · ' +
-        esc((d.domain_label || {})[x] || x) + '</option>';
-    }).join('');
-    $('#e-mentor').innerHTML =
-      '<option value="">— 暂不分配 —</option>' +
-      MENTORS.map(function (m) {
-        return '<option value="' + esc(m.id) + '">' + esc(m.name) +
-          '（' + esc(m.id) + '）</option>';
-      }).join('') +
-      '<option value="__new__">+ 新增一位 Mentor</option>';
-    renderEmployees();
-    if (eEditing === null) fillEmpForm(null);
-  } catch (e) { $('#e-list').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; }
-}
-
-$('#e-mentor').onchange = function () {
-  $('#e-mentor-new').style.display =
-    $('#e-mentor').value === '__new__' ? '' : 'none';
-};
-
-$('#e-new').onclick = function () { fillEmpForm(null); };
-
-$('#e-save').onclick = async function () {
-  var mid = $('#e-mentor').value, mname = '';
-  if (mid === '__new__') {
-    mid = $('#e-mid').value.trim();
-    mname = $('#e-mname').value.trim();
-    if (!mid || !mname) { toast('新增 Mentor 要同时填 ID 和姓名'); return; }
-  } else if (mid) {
-    var m = MENTORS.find(function (x) { return x.id === mid; });
-    mname = m ? m.name : '';
-  }
-  var body = {
-    id: (eEditing || $('#e-id').value).trim(),
-    name: $('#e-name').value.trim(),
-    team: $('#e-team').value.trim(),
-    role: $('#e-role').value.trim(),
-    domain: $('#e-domain').value,
-    onboard_date: $('#e-onboard').value,
-    mentor_id: mid,
-    mentor_name: mname
-  };
-  if (!body.id || !body.name) { toast('员工 ID 和姓名都要填'); return; }
-  $('#e-save').disabled = true;
-  try {
-    var r = await api('/admin/employees/save', j('POST', body));
-    toast(r.message);
-    eEditing = null;
-    await loadEmployees();
-    loadUsers();
-  } catch (x) { toast(x.message); }
-  $('#e-save').disabled = false;
-};
-
-$('#e-list').onclick = async function (ev) {
-  var ed = ev.target.closest('[data-eedit]');
-  if (ed) {
-    fillEmpForm(EMPS.find(function (x) { return x.id === ed.dataset.eedit; }));
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    return;
-  }
-  var dl = ev.target.closest('[data-edel]');
-  if (!dl) return;
-  if (!confirm('删除档案 ' + dl.dataset.edel + '？会同时删掉这个人的全部记忆。绑着账号的删不掉。')) return;
-  try {
-    var r = await api('/admin/employees/delete', j('POST', { id: dl.dataset.edel }));
-    toast(r.message);
-    if (eEditing === dl.dataset.edel) eEditing = null;
-    await loadEmployees();
-    loadUsers();
-  } catch (x) { toast(x.message); }
-};
 
 /* ---------------- 知识库 ---------------- */
 function renderKB(items) {
   $('#k-list').innerHTML = items.length ? items.map(function (k) {
-    const lv = '<span class="lv ' + (k.source_level === 'L3' ? 'l3' : '') + '" style="font-family:\'IBM Plex Mono\',monospace;font-size:9.5px;padding:1px 5px;border-radius:2px;background:var(--sunk);color:var(--ink3)">' +
-      esc(k.source_level) + '</span>';
     return '<div class="kbitem"><b>' + esc(k.question) + '</b><br>' +
       '<span style="color:var(--ink2)">' + esc(String(k.answer).slice(0, 130)) +
       (String(k.answer).length > 130 ? '…' : '') + '</span>' +
-      '<div class="meta">' + lv + '<span>' + esc(k.domain) + '</span><span>' + esc(k.source_name || '') + '</span>' +
+      '<div class="meta"><span>' + esc(k.source_level) + '</span>' +
+      '<span>' + esc(k.domain) + '</span><span>' + esc(k.source_name || '') + '</span>' +
       (k.stale ? '<span style="color:var(--crit)">已过期</span>' : '') +
       '<span style="margin-left:auto"></span>' +
       '<button data-edit="' + k.id + '">编辑</button>' +
@@ -507,14 +393,14 @@ function renderKB(items) {
 
 async function loadKB() {
   try {
-    const d = await api('/admin/knowledge');
+    var d = await api('/admin/knowledge');
     KB = d.items || d;
     renderKB(KB);
   } catch (e) { $('#k-list').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; }
 }
 
 $('#k-q').oninput = function () {
-  const q = $('#k-q').value.trim().toLowerCase();
+  var q = $('#k-q').value.trim().toLowerCase();
   renderKB(!q ? KB : KB.filter(function (k) {
     return (k.question + ' ' + k.answer + ' ' + (k.source_name || '')).toLowerCase().indexOf(q) >= 0;
   }));
@@ -534,38 +420,39 @@ function fillForm(k) {
 }
 
 $('#k-list').onclick = async function (e) {
-  const ed = e.target.closest('[data-edit]');
+  var ed = e.target.closest('[data-edit]');
   if (ed) {
-    const k = KB.find(function (x) { return String(x.id) === ed.dataset.edit; });
-    fillForm(k); window.scrollTo({ top: 0, behavior: 'smooth' }); return;
+    fillForm(KB.find(function (x) { return String(x.id) === ed.dataset.edit; }));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    return;
   }
-  const dl = e.target.closest('[data-del]');
-  if (dl) {
-    if (!confirm('删除这条知识？删掉之后检索就命中不到了，相关提问会走升级路径。')) return;
-    try {
-      await api('/admin/knowledge/delete', j('POST', { id: +dl.dataset.del }));
-      toast('已删除，索引已重建'); await loadKB();
-      if (String(editing) === dl.dataset.del) fillForm(null);
-    } catch (x) { toast(x.message); }
-  }
+  var dl = e.target.closest('[data-del]');
+  if (!dl) return;
+  if (!confirm('删除这条知识？删掉之后检索命中不到，相关提问会走升级路径。')) return;
+  try {
+    await api('/admin/knowledge/delete', j('POST', { id: +dl.dataset.del }));
+    toast('已删除，索引已重建');
+    await loadKB();
+    if (String(editing) === dl.dataset.del) fillForm(null);
+  } catch (x) { toast(x.message); }
 };
 
 $('#k-new').onclick = function () { fillForm(null); };
 $('#k-save').onclick = async function () {
-  const body = {
+  var body = {
     domain: $('#k-domain').value,
     question: $('#k-question').value.trim(),
     answer: $('#k-answer').value.trim(),
     source_level: $('#k-level').value,
     source_name: $('#k-source').value.trim() || '管理后台录入',
     confirmed_by: $('#k-by').value.trim(),
-    expires_on: $('#k-exp').value || null,
+    expires_on: $('#k-exp').value || null
   };
   if (!body.question || !body.answer) { toast('问题和答案都要填'); return; }
   if (editing) body.id = editing;
   $('#k-save').disabled = true;
   try {
-    const r = await api('/admin/knowledge/save', j('POST', body));
+    var r = await api('/admin/knowledge/save', j('POST', body));
     toast(r.message + '（向量已重算，索引已重建）');
     await loadKB();
     fillForm(null);
@@ -576,8 +463,8 @@ $('#k-save').onclick = async function () {
 /* ---------------- 系统 ---------------- */
 async function loadSystem() {
   try {
-    const d = await api('/admin/overview');
-    const c = d.counts, ck = d.checkpointer || {};
+    var d = await api('/admin/overview');
+    var c = d.counts, ck = d.checkpointer || {};
     $('#s-kpi').innerHTML =
       '<div class="pnl kpi"><div class="pl"><span>知识条目</span></div><div class="v">' + c.knowledge +
         '</div><div class="d">' + Object.entries(d.knowledge_by_level || {}).map(function (kv) {
@@ -588,11 +475,7 @@ async function loadSystem() {
       '<div class="pnl kpi neu"><div class="pl"><span>Checkpoint</span></div><div class="v">' +
         (ck.checkpoints != null ? ck.checkpoints : '—') + '</div><div class="d">' +
         (ck.threads != null
-          ? ck.threads + ' 个线程 · ' + (ck.pending_writes || 0) + ' 条中间写<br>' +
-            '<span class="m" style="font-size:10px;color:var(--ink3)">' +
-            Object.entries(ck.by_namespace || {}).map(function (kv) {
-              return esc(kv[0]) + ' ' + kv[1];
-            }).join(' · ') + '</span>'
+          ? ck.threads + ' 个线程 · ' + (ck.pending_writes || 0) + ' 条中间写'
           : 'MySQLSaver 未连接') + '</div></div>';
 
     $('#s-tab').innerHTML = '<thead><tr><th>表</th><th>行数</th></tr></thead><tbody>' +
@@ -603,41 +486,32 @@ async function loadSystem() {
         return '<tr><td>' + kv[0] + '</td><td class="n">' + kv[1] + '</td></tr>';
       }).join('') + '</tbody>';
 
-    // LangSmith 的状态**必须显式说出来**。"以为开着其实没开"和
-    // "以为脱敏了其实在传原文"，这两件事看界面都看不出来——
-    // 而后者会把产品的隐私承诺变成一句空话。
-    const ls = d.langsmith || {};
+    var g = d.config;
+    $('#s-cfg').innerHTML = '<thead><tr><th>项</th><th>值</th></tr></thead><tbody>' +
+      [['作答置信阈值', g.confidence_threshold],
+       ['建议相关度下限', g.advice_floor],
+       ['每周推送预算', g.weekly_push_budget + ' 次'],
+       ['一档模型', g.tier1], ['二档模型', g.tier2],
+       ['Checkpoint 后端', g.checkpoint_backend],
+       ['当前计价时段', g.is_peak_now ? '标准时段（贵一倍）' : '优惠时段']].map(function (kv) {
+        return '<tr><td>' + kv[0] + '</td><td class="n">' + esc(String(kv[1])) + '</td></tr>';
+      }).join('') + '</tbody>';
+
+    var ls = d.langsmith || {};
     $('#s-ls').innerHTML =
       '<div class="pl"><span>LangSmith 可观测</span><span>' +
         (ls.enabled ? esc(ls.project || '') : '未启用') + '</span></div>' +
       '<div class="redline ' + (!ls.enabled ? '' : ls.send_raw ? 'no' : 'ok') + '">' +
         (!ls.enabled ? '未接入' : ls.send_raw ? '⚠ 正在上传提问原文' : '已启用 · 原文本地脱敏') +
         '<span>' + esc(ls.endpoint || '') + '</span></div>' +
-      '<p class="hint" style="margin-top:9px">' + esc(ls.reason || '') + '</p>' +
-      (ls.enabled && !ls.send_raw
-        ? '<p class="hint" style="margin-top:7px">上传的是<b>结构</b>：节点树、子图层级、每步耗时、' +
-          'token、路由走向、检索分数。提问原文与回答在<b>离开本机之前</b>就被替换成 ' +
-          '<code>[已脱敏 · N 字]</code>——不是传上去再隐藏。</p>'
-        : '');
-
-    const g = d.config;
-    $('#s-cfg').innerHTML = '<thead><tr><th>项</th><th>值</th></tr></thead><tbody>' +
-      [['作答置信阈值', g.confidence_threshold],
-       ['建议相关度下限', g.advice_floor],
-       ['每周推送预算', g.weekly_push_budget + ' 次'],
-       ['一档模型', g.tier1],
-       ['二档模型', g.tier2],
-       ['Checkpoint 后端', g.checkpoint_backend],
-       ['当前计价时段', g.is_peak_now ? '标准时段（贵一倍）' : '优惠时段']].map(function (kv) {
-        return '<tr><td>' + kv[0] + '</td><td class="n">' + esc(String(kv[1])) + '</td></tr>';
-      }).join('') + '</tbody>';
+      '<p class="hint" style="margin-top:9px">' + esc(ls.reason || '') + '</p>';
   } catch (e) { $('#s-kpi').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; }
 
   try {
-    const d = await api('/admin/sessions');
-    $('#ad-sess').textContent = d.sessions.length;
+    var d2 = await api('/admin/sessions');
+    $('#ad-sess').textContent = d2.sessions.length;
     $('#s-sess').innerHTML = '<thead><tr><th>账号</th><th>登录于</th><th>过期于</th></tr></thead><tbody>' +
-      (d.sessions.length ? d.sessions.map(function (s) {
+      (d2.sessions.length ? d2.sessions.map(function (s) {
         return '<tr><td class="n">' + esc(s.username) + '</td><td class="n">' +
           esc((s.created_at || '').slice(5, 16).replace('T', ' ')) + '</td><td class="n">' +
           esc((s.expires_at || '').slice(5, 16).replace('T', ' ')) + '</td></tr>';
@@ -648,10 +522,9 @@ async function loadSystem() {
 (async function () {
   ME = await mount('/admin'); if (!ME) return;
   $('#my-views').textContent = (ME.views || []).join(', ');
-  // 先载档案再渲染账号表 —— 账号表里的档案下拉依赖 EMPS
-  await loadEmployees();
   loadUsers();
-  api('/admin/sessions').then(function (d) { $('#ad-sess').textContent = d.sessions.length; }).catch(function () {});
+  api('/admin/sessions').then(function (d) { $('#ad-sess').textContent = d.sessions.length; })
+    .catch(function () {});
 })();
 </script>
 </body>

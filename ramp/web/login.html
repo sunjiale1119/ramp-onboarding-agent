@@ -27,17 +27,11 @@
       <button class="btn pri go" id="go">登录</button>
       <div class="err2" id="err"></div>
       <div class="demo">
-        <b>演示账号</b>（点用户名自动填入，密码统一 <code>ramp2026</code>）
-        <table><tbody>
-          <tr><td class="u" data-u="linxy">linxy</td><td>林小雨 · 新人 → /newbie</td></tr>
-          <tr><td class="u" data-u="chenhao">chenhao</td><td>陈昊 · Mentor → /mentor</td></tr>
-          <tr><td class="u" data-u="wangqian">wangqian</td><td>王倩 · HR → /hr</td></tr>
-          <tr><td class="u" data-u="ops">ops</td><td>运营 / 质量 → /ops</td></tr>
-          <tr><td class="u" data-u="admin">admin</td><td>管理员 → /admin</td></tr>
-        </tbody></table>
-        <p style="margin-top:10px">演示环境的固定密码是<b>刻意选择</b>，不是疏忽——
-        真实部署要接企业 SSO。库里存的是 PBKDF2-SHA256 + 独立 salt + 20 万次迭代，
-        <b>没有任何地方存明文</b>。</p>
+        <b>还没有账号？</b>点上面的「注册」标签自助注册。<br>
+        新账号建出来是<b>待激活</b>状态，需要管理员分配角色和入职信息才能登录 ——
+        <b>注册只证明"你是谁"，授权是另一件事</b>。
+        <p style="margin-top:10px">系统初始只有一个管理员账号。密码在库里存的是
+        PBKDF2-SHA256 + 独立 salt + 20 万次迭代，<b>没有任何地方存明文</b>。</p>
       </div>
     </div>
 
@@ -96,9 +90,6 @@ async function doLogin() {
 $('#go').onclick = doLogin;
 $('#pw').onkeydown = e => { if (e.key === 'Enter') doLogin(); };
 $('#u').onkeydown = e => { if (e.key === 'Enter') $('#pw').focus(); };
-$$('[data-u]').forEach(td => td.onclick = () => {
-  $('#u').value = td.dataset.u; $('#pw').value = 'ramp2026'; $('#pw').focus();
-});
 
 async function doRegister() {
   const u = $('#ru').value.trim(), n = $('#rn').value.trim(),

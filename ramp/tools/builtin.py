@@ -20,6 +20,33 @@ from typing import Any
 from .. import config
 from . import ToolError, registry
 
+
+def _not_connected(system: str, what: str) -> ToolError:
+    """外部系统未接入时的统一回应。
+
+    ## 为什么不编一个
+
+    原来 mock_systems.json 里有一整套虚构记录：某人的社保状态、
+    某人的权限清单、一个叫「李敏」的审批人。Agent 答得很流畅，
+    直到管理员去后台核对，发现**系统里根本没有李敏这个人**。
+
+    现在数据清空了，工具的正确行为不是报一个技术错误，
+    也不是退回去猜，而是**说清楚三件事**：查的是哪个系统、
+    为什么查不到、接下来该找谁。
+
+    一个诚实的"我查不到"，比一个编出来的答案有用得多 ——
+    前者用户知道下一步做什么，后者用户会照着错的信息去办事。
+    """
+    return ToolError(
+        f"{system} 未接入",
+        user_message=(f"{what}需要查{system}，这个系统当前**未接入**，"
+                      f"所以我查不到你的具体数据。\n\n"
+                      f"这不是权限问题，也不是我不愿意查 —— "
+                      f"是这套演示环境没有连接企业的真实系统。"
+                      f"建议直接联系对应的负责部门确认。"),
+    )
+
+
 _MOCK: dict[str, Any] | None = None
 
 
@@ -87,7 +114,7 @@ def hr_query(field: str, *, _context: dict[str, Any]) -> dict[str, Any]:
     eid = _emp_id(_context)
     rec = mock()["hr_system"].get(eid)
     if rec is None:
-        raise ToolError(f"HR 系统无此人: {eid}", user_message="HR 系统里没查到你的档案，建议直接找 HRBP 王倩确认。")
+        raise _not_connected("HR 档案系统", "社保、公积金、入职材料、转正日期这类信息")
     if field not in rec:
         raise ToolError(f"未知字段: {field}")
     return {"field": field, "value": rec[field], "source": "hr_system（只读）"}
@@ -113,11 +140,14 @@ def hr_query(field: str, *, _context: dict[str, Any]) -> dict[str, Any]:
 def org_lookup(what: str, *, _context: dict[str, Any]) -> dict[str, Any]:
     d = mock()["org_directory"]
     if what == "contacts":
-        return {"contacts": d["contacts"]}
+        c = d.get("contacts") or {}
+        if not c:
+            raise _not_connected("组织架构", "HRBP、IT 服务台、行政的联系方式")
+        return {"contacts": c}
     eid = _emp_id(_context)
     rec = d.get(eid)
     if rec is None:
-        raise ToolError(f"组织架构无此人: {eid}")
+        raise _not_connected("组织架构", "汇报线、团队、带教关系")
     return {"me": rec}
 
 
@@ -149,7 +179,7 @@ def it_entitlements(resource: str | None = None, *, _context: dict[str, Any]) ->
 
     ent = desk["entitlements"].get(eid)
     if ent is None:
-        raise ToolError(f"IT 系统无此人: {eid}", user_message="IT 系统里没查到你的权限记录，建议找 IT 服务台。")
+        raise _not_connected("IT 权限系统", "已开通账号、岗位应有权限、待审批项")
 
     granted = set(ent["granted"])
     required = set(ent["required_by_role"])
@@ -201,31 +231,46 @@ def it_create_ticket(
     eid = _emp_id(_context)
     desk = mock()["it_servicedesk"]
     org = mock()["org_directory"].get(eid, {})
-    ap = desk["approvers"].get(resource, {"name": "IT 服务台", "title": "默认审批", "sla_days": 2})
 
+    # 审批人来自外部工单系统的配置。**未接入时不能瞎填一个名字。**
+    #
+    # 这一行以前的默认值会造出一个具体的人：`{"name": "李敏", ...}`
+    # 来自虚构配置，于是 Agent 回答"审批人李敏（数据平台负责人）"，
+    # 用户去后台核对 —— 系统里根本没有李敏这个人。
+    #
+    # 提交一个工单却说不清谁来批，本身是可接受的（真实工单系统会自动分派）；
+    # 说出一个不存在的人名，不可接受。**宁可说"待分派"，不可以编一个人。**
+    ap = (desk.get("approvers") or {}).get(resource)
+    approver = (f"{ap['name']}（{ap.get('title', '')}）" if ap
+                else "由 IT 服务台按资源自动分派")
+    sla = ap.get("sla_days", 2) if ap else None
+
+    who = _context.get("employee_name") or eid
+    team_role = " · ".join(x for x in (org.get("team"), org.get("role")) if x)
     fields = {
         "系统": "IT 服务台 · 权限申请",
-        "申请人": f"{_context.get('employee_name', eid)}（{org.get('team','')} · {org.get('role','')}）",
+        "申请人": f"{who}（{team_role}）" if team_role else str(who),
         "权限项": resource,
         "理由": reason,
-        "审批人": f"{ap['name']}（{ap['title']}）",
+        "审批人": approver,
         "时长": f"{duration_days} 天，到期自动回收",
-        "预计时长": f"{ap.get('sla_days', 2)} 个工作日",
+        "预计时长": f"{sla} 个工作日" if sla else "以 IT 服务台的分派结果为准",
     }
 
     if _preview:
         # 只回显，不落库——真正的提交在用户确认之后
         return {"preview": True, "fields": fields}
 
-    no = desk["next_ticket_no"]
+    no = desk.get("next_ticket_no", 10001)
     desk["next_ticket_no"] = no + 1
     ticket = {
         "ticket_id": f"IT-{no}",
         "fields": fields,
         "status": "pending_approval",
         "submitted_on": date.today().isoformat(),
-        "expected_by": (date.today() + timedelta(days=ap.get("sla_days", 2))).isoformat(),
         "revocable_until_minutes": 5,
     }
-    desk["tickets"].append(ticket)
+    if sla:
+        ticket["expected_by"] = (date.today() + timedelta(days=sla)).isoformat()
+    desk.setdefault("tickets", []).append(ticket)
     return ticket
