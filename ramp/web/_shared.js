@@ -54,6 +54,19 @@ async function mount(current) {
       <button id="lo">登出</button></span>
   </header>`);
   document.body.insertBefore(hd, document.body.firstChild);
+
+  // 演示数据横幅。**不标出来，看的人有理由以为这是真接了企业系统。**
+  // 知识库来自虚构公司「云启科技」，员工档案、社保、工单全是造的；
+  // 而调用链、成本、检索分数是真的 —— 这两件事必须分清楚，
+  // 一个讲隐私和诚实的产品，不该在自己的数据来源上含糊。
+  if (me.demo_mode) {
+    const b = el('<div class="demobar">' +
+      '<b>演示数据</b>' +
+      '<span>知识库、员工档案、社保与工单均为虚构（公司「云启科技」不存在）。' +
+      '真实的是：模型调用、向量检索、成本核算与调用链留痕。</span>' +
+      '</div>');
+    document.body.insertBefore(b, hd);
+  }
   $('#lo').onclick = async () => {
     try { await api('/logout', { method: 'POST' }); } catch (e) {}
     location.href = '/login';

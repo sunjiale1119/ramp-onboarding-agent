@@ -276,3 +276,12 @@ footer{max-width:1280px;margin:0 auto;padding:0 20px 40px;font-size:11.5px;color
 .bind.warn{color:var(--warn)}
 .bind.bad{color:var(--crit)}
 .bind .sub2i{color:var(--ink3)}
+
+/* 演示数据横幅。醒目但不喧宾夺主 —— 它是声明，不是警告。 */
+.demobar{background:var(--warns);color:var(--warn);border-bottom:1px solid var(--rule2);
+  padding:7px 20px;font-size:12px;line-height:1.6;display:flex;gap:10px;
+  flex-wrap:wrap;align-items:baseline}
+.demobar b{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.14em;
+  text-transform:uppercase;border:1px solid currentColor;border-radius:2px;
+  padding:1px 6px;flex:none}
+.demobar span{color:var(--ink2)}

@@ -16,6 +16,7 @@
   <div class="tabs" style="max-width:420px" role="tablist">
     <button role="tab" aria-selected="true" data-pane="u">用户与授权 <span id="u-badge"></span></button>
     <button role="tab" aria-selected="false" data-pane="k">知识库</button>
+    <button role="tab" aria-selected="false" data-pane="e">员工档案</button>
     <button role="tab" aria-selected="false" data-pane="s">系统</button>
   </div>
 
@@ -79,6 +80,49 @@
   </div></div></div>
 
   <!-- ---------------- 系统 ---------------- -->
+  <!-- ---------------- 员工档案 ---------------- -->
+  <div class="pane" data-pane="e"><div class="shell"><div class="pad adm">
+    <div>
+      <div class="note" style="margin-bottom:14px"><span class="nt">档案和账号是两件事</span>
+        <b>账号</b>回答"你是谁、能进哪个页面"；<b>档案</b>回答"你哪天入职、谁带你、在哪个组"。<br>
+        新人注册后需要两步：在「用户与授权」里<b>激活并派角色</b>，再在这里<b>建一份档案并绑定</b>——
+        没有档案，新人工作台打不开，30 天时间线和主动推送都无从谈起。
+      </div>
+      <div id="e-list"></div>
+    </div>
+    <div>
+      <div class="pnl"><div class="pl"><span id="e-mode">新建档案</span><span id="e-id2"></span></div>
+        <div class="kbform">
+          <div><label>员工 ID</label><input id="e-id" placeholder="e_zhangsan（建档后不可改）"></div>
+          <div><label>姓名</label><input id="e-name" placeholder="张三"></div>
+          <div class="kbrow">
+            <div><label>团队</label><input id="e-team" placeholder="数据组"></div>
+            <div><label>岗位</label><input id="e-role" placeholder="后端工程师"></div>
+          </div>
+          <div class="kbrow">
+            <div><label>域</label><select id="e-domain"></select></div>
+            <div><label>入职日期</label><input id="e-onboard" type="date"></div>
+          </div>
+          <div><label>Mentor</label><select id="e-mentor"></select></div>
+          <div id="e-mentor-new" style="display:none">
+            <div class="kbrow">
+              <div><label>Mentor ID</label><input id="e-mid" placeholder="m_lisi"></div>
+              <div><label>Mentor 姓名</label><input id="e-mname" placeholder="李四"></div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:4px">
+            <button class="btn pri" id="e-save">保存</button>
+            <button class="btn" id="e-new">清空 / 新建</button>
+          </div>
+        </div>
+        <div class="note" style="margin-top:12px"><span class="nt">保存时顺带做的事</span>
+          写入三条<b>语义记忆</b>（岗位 / Mentor / 入职日期）。新人工作台右栏那个
+          「Ramp 记得关于我的」读的就是这三条 —— 不写的话新人第一次打开看到的是空的。<br>
+          bootstrap 灌种子时做了这件事，<b>手工建档案也必须做</b>，否则两条路径产出的数据不一致。</div>
+      </div>
+    </div>
+  </div></div></div>
+
   <div class="pane" data-pane="s"><div class="shell"><div class="pad">
     <div class="grid g3" id="s-kpi"></div>
     <div class="grid g2" style="margin-top:14px">
@@ -100,12 +144,14 @@
 <script src="/_shared.js"></script>
 <script>
 let ME = null, ROLES = [], KB = [], editing = null;
+let EMPS = [], MENTORS = [], DOMAINS = [], eEditing = null;
 
 $$('.tabs button').forEach(function (b) {
   b.onclick = function () {
     $$('.tabs button').forEach(function (x) { x.setAttribute('aria-selected', String(x === b)); });
     $$('.pane').forEach(function (p) { p.classList.toggle('on', p.dataset.pane === b.dataset.pane); });
     if (b.dataset.pane === 'k' && !KB.length) loadKB();
+    if (b.dataset.pane === 'e') loadEmployees();
     if (b.dataset.pane === 's') loadSystem();
   };
 });
@@ -150,8 +196,7 @@ function renderUsers(users) {
         '<td class="n">' + esc(u.username) + (self ? ' <span class="hint">(你)</span>' : '') + '</td>' +
         '<td>' + esc(u.display_name) + '</td>' +
         '<td><select data-f="role">' + opts + '</select></td>' +
-        '<td><input data-f="employee_id" value="' + esc(u.employee_id || '') + '" placeholder="e_xxx / m_xxx">' +
-          bindNote(u) + '</td>' +
+        '<td>' + empSelect(u) + bindNote(u) + '</td>' +
         '<td><span class="pill ' + (u.active ? 'on' : 'off') + '">' + (u.active ? '已激活' : '待激活') + '</span></td>' +
         '<td style="white-space:nowrap">' +
           '<button class="mini" data-act="save">保存</button> ' +
@@ -190,6 +235,160 @@ $('#u-tab').onclick = async function (e) {
     const r = await api(act === 'del' ? '/admin/users/delete' : '/admin/users/update', j('POST', body));
     toast(r.message);
     renderUsers(r.users);
+  } catch (x) { toast(x.message); }
+};
+
+/* ---------------- 员工档案 ---------------- */
+
+/** 账号表里的档案选择器。
+ *
+ *  原来这里是个自由文本框，要管理员手打 `e_zhangsan`。
+ *  **让人手打一个必须精确匹配的外键，本身就是错误设计** —— 打错一个字母，
+ *  轻则这个账号打不开工作台，重则绑到别人的档案上读到别人的提问原文。
+ *  改成下拉之后，能选的都是真实存在、且没被别人占用的档案。
+ */
+function empSelect(u) {
+  var opts = ['<option value="">— 未绑定 —</option>'];
+  EMPS.forEach(function (e) {
+    if (e.bound_to && e.bound_to !== u.username) return;
+    opts.push('<option value="' + esc(e.id) + '"' +
+      (e.id === u.employee_id ? ' selected' : '') + '>' +
+      esc(e.name) + ' · ' + esc(e.team) + '</option>');
+  });
+  MENTORS.forEach(function (m) {
+    if (m.bound_to && m.bound_to !== u.username) return;
+    opts.push('<option value="' + esc(m.id) + '"' +
+      (m.id === u.employee_id ? ' selected' : '') + '>' +
+      esc(m.name) + ' · Mentor</option>');
+  });
+  var known = EMPS.some(function (e) { return e.id === u.employee_id; }) ||
+              MENTORS.some(function (m) { return m.id === u.employee_id; });
+  if (u.employee_id && !known) {
+    opts.push('<option value="' + esc(u.employee_id) + '" selected>' +
+      esc(u.employee_id) + '（查无此档案）</option>');
+  }
+  return '<select data-f="employee_id">' + opts.join('') + '</select>';
+}
+
+function renderEmployees() {
+  $('#e-list').innerHTML = EMPS.length ? EMPS.map(function (e) {
+    var owner = e.bound_to
+      ? '<span style="color:var(--good)">账号 ' + esc(e.bound_to) + '</span>'
+      : '<span style="color:var(--warn)">未绑定账号</span>';
+    return '<div class="kbitem"><b>' + esc(e.name) + '</b>' +
+      '<span style="color:var(--ink3)"> · ' + esc(e.team) + ' ' + esc(e.role) + '</span><br>' +
+      '<span style="color:var(--ink2)">入职 ' + esc(e.onboard_date) +
+      '（第 ' + e.day_index + ' 天）· Mentor ' + esc(e.mentor_name || '未分配') + '</span>' +
+      '<div class="meta"><span>' + esc(e.id) + '</span><span>' + esc(e.domain) + '</span>' +
+      owner + '<span style="margin-left:auto"></span>' +
+      '<button data-eedit="' + esc(e.id) + '">编辑</button>' +
+      '<button data-edel="' + esc(e.id) + '">删除</button></div></div>';
+  }).join('') : '<p class="hint">还没有任何员工档案。在右侧新建一份。</p>';
+}
+
+function fillEmpForm(e) {
+  eEditing = e ? e.id : null;
+  $('#e-mode').textContent = e ? '编辑档案' : '新建档案';
+  $('#e-id2').textContent = e ? e.id : '';
+  $('#e-id').value = e ? e.id : '';
+  $('#e-id').disabled = !!e;
+  $('#e-name').value = e ? e.name : '';
+  $('#e-team').value = e ? e.team : '';
+  $('#e-role').value = e ? e.role : '';
+  $('#e-domain').value = e ? e.domain : 'biz';
+  $('#e-onboard').value = e ? e.onboard_date : new Date().toISOString().slice(0, 10);
+  var known = e && e.mentor_id &&
+    MENTORS.some(function (m) { return m.id === e.mentor_id; });
+  $('#e-mentor').value = known ? e.mentor_id : (e && e.mentor_id ? '__new__' : '');
+  $('#e-mentor').onchange();
+  $('#e-mid').value = (e && !known && e.mentor_id) ? e.mentor_id : '';
+  $('#e-mname').value = (e && !known && e.mentor_name) ? e.mentor_name : '';
+}
+
+async function loadEmployees() {
+  try {
+    var d = await api('/admin/employees');
+    EMPS = d.employees || [];
+    DOMAINS = d.domains || ['hr', 'it', 'biz'];
+    var bound = {};
+    (await api('/admin/users')).users.forEach(function (u) {
+      if (u.employee_id) bound[u.employee_id] = u.username;
+    });
+    MENTORS = (d.mentors || []).map(function (m) {
+      return { id: m.id, name: m.name, bound_to: bound[m.id] };
+    });
+
+    $('#e-domain').innerHTML = DOMAINS.map(function (x) {
+      return '<option value="' + x + '">' + x + ' · ' +
+        esc((d.domain_label || {})[x] || x) + '</option>';
+    }).join('');
+    $('#e-mentor').innerHTML =
+      '<option value="">— 暂不分配 —</option>' +
+      MENTORS.map(function (m) {
+        return '<option value="' + esc(m.id) + '">' + esc(m.name) +
+          '（' + esc(m.id) + '）</option>';
+      }).join('') +
+      '<option value="__new__">+ 新增一位 Mentor</option>';
+    renderEmployees();
+    if (eEditing === null) fillEmpForm(null);
+  } catch (e) { $('#e-list').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; }
+}
+
+$('#e-mentor').onchange = function () {
+  $('#e-mentor-new').style.display =
+    $('#e-mentor').value === '__new__' ? '' : 'none';
+};
+
+$('#e-new').onclick = function () { fillEmpForm(null); };
+
+$('#e-save').onclick = async function () {
+  var mid = $('#e-mentor').value, mname = '';
+  if (mid === '__new__') {
+    mid = $('#e-mid').value.trim();
+    mname = $('#e-mname').value.trim();
+    if (!mid || !mname) { toast('新增 Mentor 要同时填 ID 和姓名'); return; }
+  } else if (mid) {
+    var m = MENTORS.find(function (x) { return x.id === mid; });
+    mname = m ? m.name : '';
+  }
+  var body = {
+    id: (eEditing || $('#e-id').value).trim(),
+    name: $('#e-name').value.trim(),
+    team: $('#e-team').value.trim(),
+    role: $('#e-role').value.trim(),
+    domain: $('#e-domain').value,
+    onboard_date: $('#e-onboard').value,
+    mentor_id: mid,
+    mentor_name: mname
+  };
+  if (!body.id || !body.name) { toast('员工 ID 和姓名都要填'); return; }
+  $('#e-save').disabled = true;
+  try {
+    var r = await api('/admin/employees/save', j('POST', body));
+    toast(r.message);
+    eEditing = null;
+    await loadEmployees();
+    loadUsers();
+  } catch (x) { toast(x.message); }
+  $('#e-save').disabled = false;
+};
+
+$('#e-list').onclick = async function (ev) {
+  var ed = ev.target.closest('[data-eedit]');
+  if (ed) {
+    fillEmpForm(EMPS.find(function (x) { return x.id === ed.dataset.eedit; }));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    return;
+  }
+  var dl = ev.target.closest('[data-edel]');
+  if (!dl) return;
+  if (!confirm('删除档案 ' + dl.dataset.edel + '？会同时删掉这个人的全部记忆。绑着账号的删不掉。')) return;
+  try {
+    var r = await api('/admin/employees/delete', j('POST', { id: dl.dataset.edel }));
+    toast(r.message);
+    if (eEditing === dl.dataset.edel) eEditing = null;
+    await loadEmployees();
+    loadUsers();
   } catch (x) { toast(x.message); }
 };
 
@@ -352,6 +551,8 @@ async function loadSystem() {
 (async function () {
   ME = await mount('/admin'); if (!ME) return;
   $('#my-views').textContent = (ME.views || []).join(', ');
+  // 先载档案再渲染账号表 —— 账号表里的档案下拉依赖 EMPS
+  await loadEmployees();
   loadUsers();
   api('/admin/sessions').then(function (d) { $('#ad-sess').textContent = d.sessions.length; }).catch(function () {});
 })();

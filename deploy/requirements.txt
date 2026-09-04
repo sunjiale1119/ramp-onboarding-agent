@@ -1,0 +1,19 @@
+# 和 pyproject.toml 逐条对齐。
+# 第一版漏了 jieba（中文分词，BM25 检索依赖它）、pydantic、grandalf——
+# 这类漏依赖不会在构建时报错，会在**第一次真实提问时**才炸。
+langgraph>=0.2.60
+langgraph-checkpoint-sqlite>=2.0.0
+langchain-core>=0.3.0
+openai>=1.60.0
+sqlalchemy>=2.0.36
+pymysql>=1.1.1
+cryptography>=44.0.0
+rank-bm25>=0.2.2
+numpy>=2.0.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+python-dotenv>=1.0.1
+pydantic>=2.10.0
+jieba>=0.42.1
+httpx>=0.28.0
+grandalf>=0.8

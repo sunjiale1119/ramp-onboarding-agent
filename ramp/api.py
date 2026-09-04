@@ -25,6 +25,31 @@ from pydantic import BaseModel, Field
 from . import auth, config, db, escalate, memory, proactive, runtime, trace, knowledge
 
 app = FastAPI(title="爬坡 Ramp API", version="0.1.0")
+
+
+@app.on_event("startup")
+def _demo_startup() -> None:
+    """演示模式：每次启动把演示员工滚回 30 天窗口内。
+
+    容器 restart 策略是 unless-stopped，服务器重启会自动拉起，
+    所以这个钩子实际上就是"演示站每次醒来都自我校准一次"。
+    """
+    if not config.DEMO_MODE:
+        return
+    try:
+        from .bootstrap import refresh_demo_dates
+
+        n = refresh_demo_dates()
+        if n:
+            import logging
+
+            logging.getLogger("ramp").warning(
+                "[演示模式] 已把 %d 位演示员工的入职日期滚回 30 天窗口内", n)
+    except Exception as exc:  # noqa: BLE001
+        # 演示数据校准失败不该拖垮启动 —— 大不了时间线不好看
+        import logging
+
+        logging.getLogger("ramp").warning("[演示模式] 日期校准失败：%s", exc)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # 本地原型演示；上生产必须收窄
@@ -199,7 +224,7 @@ def do_logout(response: Response, ramp_session: str | None = Cookie(default=None
 
 @app.get("/api/me")
 def whoami(p: auth.Principal = Depends(current)) -> dict[str, Any]:
-    return p.to_dict()
+    return {**p.to_dict(), "demo_mode": config.DEMO_MODE}
 
 
 @app.get("/api/health")
@@ -712,6 +737,130 @@ def admin_overview(p: auth.Principal = Depends(require("admin"))) -> dict[str, A
             "is_peak_now": config.is_peak(),
         },
     }
+
+
+# ------------------------------------------------------------------ 员工档案
+@app.get("/api/admin/employees")
+def admin_employees(p: auth.Principal = Depends(require("admin"))) -> dict[str, Any]:
+    """员工档案清单，附带「已被哪个账号绑定」。
+
+    这一栏是补上来的：原来档案只能靠 bootstrap 从种子文件灌进去，
+    管理后台只能把账号绑到**已存在**的档案上。
+    于是一个新注册的人卡在半路——账号激活了、角色派了，
+    但没有档案，工作台打不开，而管理员在界面上**找不到任何地方能建档案**。
+    """
+    ses = db.get_session()
+    try:
+        rows = ses.query(db.Employee).order_by(db.Employee.onboard_date.desc()).all()
+        bound = {u["employee_id"]: u["username"]
+                 for u in auth.list_users() if u["employee_id"]}
+        # mentor 不在 employees 表里，是以 mentor_id 字段存在的，单独汇总
+        mentors: dict[str, str] = {}
+        for e in rows:
+            if e.mentor_id:
+                mentors.setdefault(e.mentor_id, e.mentor_name or e.mentor_id)
+        return {
+            "employees": [{
+                "id": e.id, "name": e.name, "team": e.team, "role": e.role,
+                "domain": e.domain, "mentor_id": e.mentor_id,
+                "mentor_name": e.mentor_name,
+                "onboard_date": e.onboard_date.isoformat(),
+                "day_index": e.day_index(),
+                "bound_to": bound.get(e.id),
+            } for e in rows],
+            "mentors": [{"id": k, "name": v} for k, v in sorted(mentors.items())],
+            "domains": list(config.DOMAINS),
+            "domain_label": config.DOMAIN_LABEL,
+        }
+    finally:
+        ses.close()
+
+
+@app.post("/api/admin/employees/save")
+def admin_employee_save(body: dict,
+                        p: auth.Principal = Depends(require("admin"))) -> dict[str, Any]:
+    """新建或修改员工档案。
+
+    新建时会**顺带写入三条语义记忆**（岗位 / Mentor / 入职日期）——
+    因为新人工作台右栏那个「Ramp 记得关于我的」读的就是这三条，
+    不写的话新人第一次打开看到的是空的。
+    bootstrap 里做了这件事，手工建档案时也必须做，否则两条路径产出的数据不一致。
+    """
+    from datetime import date as _date
+
+    emp_id = str(body.get("id", "")).strip()
+    if not emp_id or not emp_id.replace("_", "").isalnum():
+        raise HTTPException(400, "员工 ID 只能用字母、数字、下划线，例如 e_zhangsan")
+    name = str(body.get("name", "")).strip()
+    if not name:
+        raise HTTPException(400, "请填写姓名")
+    try:
+        onboard = _date.fromisoformat(str(body.get("onboard_date", "")))
+    except ValueError:
+        raise HTTPException(400, "入职日期格式应为 YYYY-MM-DD") from None
+
+    ses = db.get_session()
+    try:
+        row = ses.get(db.Employee, emp_id)
+        created = row is None
+        if created:
+            row = db.Employee(id=emp_id)
+            ses.add(row)
+        row.name = name
+        row.team = str(body.get("team", "")).strip() or "未填"
+        row.role = str(body.get("role", "")).strip() or "未填"
+        row.domain = str(body.get("domain", "biz"))
+        row.mentor_id = str(body.get("mentor_id", "")).strip() or None
+        row.mentor_name = str(body.get("mentor_name", "")).strip() or None
+        row.onboard_date = onboard
+        ses.commit()
+
+        # 语义记忆对账：三条事实必须和档案一致（新建时补齐，修改时更新）
+        facts = [("岗位", f"{row.team} · {row.role}"),
+                 ("Mentor", row.mentor_name or "未分配"),
+                 ("入职日期", row.onboard_date.isoformat())]
+        for topic, content in facts:
+            m = (ses.query(db.Memory)
+                 .filter_by(subject_id=emp_id, kind="semantic", topic=topic).first())
+            if m is None:
+                ses.add(db.Memory(subject_id=emp_id, kind="semantic", topic=topic,
+                                  content=content, visible_to_self=True,
+                                  visible_to_mentor=True, visible_to_hr=False))
+            elif m.content != content:
+                m.content = content
+        ses.commit()
+    finally:
+        ses.close()
+    return {"ok": True, "id": emp_id,
+            "message": "已建档并写入语义记忆" if created else "已更新"}
+
+
+@app.post("/api/admin/employees/delete")
+def admin_employee_delete(body: dict,
+                          p: auth.Principal = Depends(require("admin"))) -> dict[str, Any]:
+    """删除档案。**绑着账号的删不掉**——先解绑再删。
+
+    否则那个账号会变成「绑了一个不存在的 id」，登录后工作台直接报错，
+    而管理员在用户列表里只看到一个红色的「查无此档案」，
+    完全不知道是自己刚才删的。
+    """
+    emp_id = str(body.get("id", "")).strip()
+    owner = next((u["username"] for u in auth.list_users()
+                  if u["employee_id"] == emp_id), None)
+    if owner:
+        raise HTTPException(400, f"档案 {emp_id} 还绑在账号 {owner} 上，请先解绑再删除")
+
+    ses = db.get_session()
+    try:
+        row = ses.get(db.Employee, emp_id)
+        if row is None:
+            raise HTTPException(404, "档案不存在")
+        n_mem = ses.query(db.Memory).filter_by(subject_id=emp_id).delete()
+        ses.delete(row)
+        ses.commit()
+    finally:
+        ses.close()
+    return {"ok": True, "message": f"已删除档案与 {n_mem} 条记忆"}
 
 
 @app.get("/api/admin/knowledge")

@@ -1,0 +1,92 @@
+# 爬坡 Ramp 线上编排
+#
+# 这台机器上已经跑着 kaogong（申论项目，占用 80 与 8770），
+# 所有配置都刻意避开它 —— 网络、卷、容器名、端口都独立。
+
+services:
+  mysql:
+    # 用 MariaDB 而不是 MySQL —— 这是被网络逼出来的选择，不是偏好。
+    # 这台机器在国内，Docker Hub 的 mysql:8.0（129MB）拉到 11MB 就断流，
+    # 五个国内镜像源全部超时；mariadb:11.4 从 daocloud 一次拉通。
+    #
+    # 换之前逐条核对过兼容性：项目里的原生 SQL 是
+    # REPLACE INTO / LONGBLOB / ENGINE=InnoDB / CREATE DATABASE IF NOT EXISTS，
+    # 全是两边通用的写法；SQLAlchemy 的 mysql+pymysql 驱动也支持 MariaDB。
+    # 唯一的差别是 db.ping() 会返回 "MySQL 11.4.x-MariaDB" —— 显示文案而已。
+    image: mariadb:11.4
+    container_name: ramp-mysql
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MYSQL_PASSWORD}
+      MARIADB_DATABASE: ramp
+      TZ: Asia/Shanghai
+    command:
+      # 这台机器总共 1.7G 内存，还要分给 kaogong 和应用容器。
+      # MySQL 8 默认 innodb_buffer_pool_size 是 128M，但整个 mysqld
+      # 起来仍要 400M+。下面这几项把它压到 ~250M。
+      # 演示场景数据量很小（53 条知识、几十条记忆），够用。
+      - --innodb-buffer-pool-size=64M
+      - --innodb-log-buffer-size=8M
+      - --key-buffer-size=8M
+      - --max-connections=30
+      - --performance-schema=OFF
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - ramp-mysql-data:/var/lib/mysql
+    healthcheck:
+      # 应用必须等 MySQL 真的能接受连接才启动。
+      # 只等容器 running 是不够的 —— MySQL 容器起来之后还要初始化几十秒，
+      # 这期间连上去会直接报错，应用崩溃退出。
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    networks: [ramp-net]
+
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: ramp:latest
+    container_name: ramp
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_DB: ramp
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
+      DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL}
+      # 这三行不能省。默认后端是 hashing（一个不调 API 的本地兜底实现），
+      # 少了它们服务照样起、bootstrap 照样成功、页面照样能用 ——
+      # 只是语义检索退化成字符 n-gram 哈希，"年假"匹配不上"休假额度"。
+      # **一个不报错的降级，比一个崩溃难发现得多。**
+      RAMP_EMBEDDING_BACKEND: dashscope
+      RAMP_EMBEDDING_MODEL: text-embedding-v4
+      RAMP_EMBEDDING_DIM: "1024"
+      # 演示模式：界面挂「演示数据」横幅 + 每次启动把演示员工滚回 30 天窗口。
+      # 真实部署必须关掉 —— 一个会自己改员工入职日期的 HR 系统是灾难。
+      RAMP_DEMO_MODE: "1"
+      # 线上不接 LangSmith：多一个外部依赖就多一个启动失败的可能，
+      # 而且演示环境的 trace 没人看。要开就填 key 再重启。
+      LANGSMITH_API_KEY: ""
+      TZ: Asia/Shanghai
+    ports:
+      # 只绑 8000。80 归 kaogong，不动它。
+      - "8000:8000"
+    networks: [ramp-net]
+
+volumes:
+  ramp-mysql-data:
+
+networks:
+  ramp-net:
+    driver: bridge

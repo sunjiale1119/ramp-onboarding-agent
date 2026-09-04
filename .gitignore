@@ -16,3 +16,11 @@ ramp_checkpoints.sqlite
 .sid
 # 成本采样中间结果，结论已写进 docs/cost-model.md
 .route_costs.json
+
+# 服务运行日志
+ramp-server.log
+*.log
+# 带时间戳的评测报告是每次跑出来的中间产物，只有 full_run_v*.json 是留档基线。
+# 中断的、只跑了子集的报告尤其不该入库 —— 作品集里塞一堆半截数据是噪音。
+ramp/eval/reports/report_*.json
+!ramp/eval/reports/report_20260904_092709.json
