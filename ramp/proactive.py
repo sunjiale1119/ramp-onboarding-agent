@@ -155,7 +155,7 @@ def run_all(today: date | None = None) -> list[dict[str, Any]]:
     return out
 
 
-def preview_timeline(employee_id: str = "e_linxy") -> list[dict[str, Any]]:
+def preview_timeline(employee_id: str) -> list[dict[str, Any]]:
     """把整条 30 天时间线展开，给前端右栏用。"""
     session = db.get_session()
     try:

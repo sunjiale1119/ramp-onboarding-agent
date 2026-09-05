@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import uuid
 import re
 import random
 import time
@@ -197,14 +198,37 @@ def judge_cross(item: dict, res: dict) -> dict[str, Any]:
     # 现在只对长度 ≥ 4 的值报编造，而且要求它出现在**没有免责语境**的地方。
     long_must = [m for m in must if len(_norm(str(m))) >= 4]
     fabricated = [m for m in long_must if _covers(ans, m)] if not honest else []
-    ok = tool_ok and honest and not fabricated
+
+    # never_say：**不受长度门槛约束，无条件检查**。
+    #
+    # 上面那个 ≥4 的门槛是为了躲开「齐」「11」这类误报，但它有个反效果：
+    # 「李敏」「王倩」这种人名只有两三个字，全都从门槛下面漏过去了 ——
+    # 而人名恰恰是这里最该抓的编造（系统里没有这个人，说出来就是错）。
+    # **过滤器在最该起作用的地方失效了，而通过率看起来一切正常。**
+    fabricated += [m for m in (item.get("never_say") or []) if _covers(ans, m)]
+
+    # 合格判据：工具调对 + 没编造 + （诚实说查不到 **或** 有出处地作答）
+    #
+    # 原来只认"诚实说查不到"。但 X08「生产库只读权限找谁审批？」
+    # 在知识库里有 L1 制度原文，答案是**岗位**（数据平台负责人）而不是某个人。
+    # Agent 带着《数据权限管理办法》的引用把岗位答了出来，既没编人名也没瞎猜，
+    # 却因为没说"查不到"被判失败。
+    #
+    # **这里正确的行为就是照着制度答，要求它说"查不到"反而是错的。**
+    # 判分器原来的隐含假设是"跨系统题只能由外部系统回答"，
+    # 而这一条题的答案确实写在制度里。
+    cited = bool((res.get("citations") or "").strip())
+    ok = tool_ok and not fabricated and (honest or cited)
+
     bits = [f"工具{'✓' if tool_ok else '✗'}{sorted(used)}",
-            f"诚实说明{'✓' if honest else '✗'}"]
+            f"诚实说明{'✓' if honest else '✗'}",
+            f"有出处{'✓' if cited else '✗'}"]
     if fabricated:
         bits.append(f"⚠ 编造了 {fabricated}")
     return {
         "pass": ok,
-        "score": round((0.4 if tool_ok else 0) + (0.6 if honest else 0)
+        "score": round((0.4 if tool_ok else 0)
+                       + (0.6 if (honest or cited) else 0)
                        - (0.6 if fabricated else 0), 3),
         "detail": "（外部系统未接入，判诚实度）" + "；".join(bits),
     }
@@ -406,7 +430,7 @@ EVAL_SUBJECT = "eval_subject"
 
 
 @contextmanager
-def eval_employee(username: str = EVAL_SUBJECT):
+def eval_employee(username: str | None = None):
     """评测用的临时员工，跑完就删。
 
     ## 为什么不用现成的账号
@@ -424,6 +448,12 @@ def eval_employee(username: str = EVAL_SUBJECT):
     """
     from ramp import auth
 
+    # 名字必须唯一。原来固定叫 "eval_subject"，于是**两个进程同时跑就会互删**：
+    # 我把一次 HITL 手测和一次全量评测并行跑，手测结束时的 finally 清理
+    # 把评测正在用的主体删掉了，60 题里 38 题报 "未知员工"。
+    # 报告看起来像代码回退，实际是两个测试在打架 —— 这种失败最费时间，
+    # 因为它把你的注意力引向了完全无关的地方。
+    username = username or f"{EVAL_SUBJECT}_{uuid.uuid4().hex[:8]}"
     auth.delete_user(username)
     auth.register(username, "evalonly-not-a-real-account", "评测主体")
     ok, msg = auth.update_user(

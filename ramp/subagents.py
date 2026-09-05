@@ -406,11 +406,20 @@ def _make_execute(domain: str):
                     "pending_action": None, "spans": [sp.to_dict()]}
 
         d = tr.data
-        text = (
-            f"工单已提交：**{d['ticket_id']}**，审批人 {d['fields']['审批人']}，"
-            f"预计 {d['expected_by']} 前有结果。\n\n"
-            f"这件事我先挂起了——有结果我会主动通知你，你不用回来问。\n\n"
-            f"撤回窗口还剩 {d['revocable_until_minutes']} 分钟。"
+        # expected_by 只在服务台配了该资源的 SLA 时才存在。
+        # 外部系统未接入时它没有——原来这里直接取 d['expected_by']，
+        # 于是**点了确认就崩**。确认卡片本身渲染得好好的，崩在确认之后，
+        # 是这条路径上最不容易被发现的位置：演示时只要不点确认就看不出来。
+        eta = d.get("expected_by")
+        who = (d.get("fields") or {}).get("审批人") or "待分派"
+        head = f"工单已提交：**{d['ticket_id']}**。"
+        if eta:
+            text = f"{head}审批人 {who}，预计 {eta} 前有结果。"
+        else:
+            text = f"{head}审批人与预计时间由 IT 服务台分派后确定（当前：{who}）。"
+        text += (
+            "\n\n这件事我先挂起了——有结果我会主动通知你，你不用回来问。"
+            f"\n\n撤回窗口还剩 {d.get('revocable_until_minutes', 5)} 分钟。"
         )
         return {
             "answer": text, "route": "answer", "pending_action": None,

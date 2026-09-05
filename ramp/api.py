@@ -50,7 +50,9 @@ def _startup() -> None:
 # ------------------------------------------------------------------ 模型
 class AskIn(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
-    employee_id: str = "e_linxy"
+    # 没有默认值：原来写死 "e_linxy"（一个已被删除的演示员工），
+    # 客户端漏传时会静默问到别人头上，而不是报错。
+    employee_id: str = Field(min_length=1, max_length=64)
     session_id: str | None = None
 
 
@@ -62,7 +64,10 @@ class ConfirmIn(BaseModel):
 class AnswerIn(BaseModel):
     escalation_id: int
     answer: str = Field(min_length=1, max_length=4000)
-    confirmed_by: str = "陈昊"
+    # confirmed_by 不再从请求体取 —— 由服务端从登录态推导。
+    # 客户端传什么就信什么，等于任何 Mentor 都能把知识署成别人的名字；
+    # 而原来的默认值 "陈昊" 更糟：系统里没有这个人，
+    # 却会成为知识条目上那个"由谁确认"的落款。
     sink: bool = True
 
 
@@ -341,7 +346,7 @@ def mentor_answer(body: AnswerIn, p: auth.Principal = Depends(require("mentor"))
     try:
         r = escalate.answer_and_sink(
             session, body.escalation_id,
-            answer=body.answer, confirmed_by=body.confirmed_by, sink=body.sink,
+            answer=body.answer, confirmed_by=p.display_name, sink=body.sink,
         )
         if not r.get("ok"):
             raise HTTPException(400, r.get("error", "处理失败"))
