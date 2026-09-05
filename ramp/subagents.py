@@ -280,6 +280,7 @@ def _make_act(domain: str):
         step = 0
         pending: dict[str, Any] | None = None
         text_parts: list[str] = []
+        kb_hits: list[dict[str, Any]] = []
 
         while step < config.MAX_LOOP_STEPS:
             step += 1
@@ -321,6 +322,17 @@ def _make_act(domain: str):
                     break
 
                 payload = tr.data if tr.ok else {"error": tr.user_message}
+
+                # 工具路径里也可能命中知识库 —— 把出处收集起来。
+                #
+                # citations 原来只在 retrieve / answer / advice 节点写，act 路径从不写。
+                # 结果是：模型在正文里老老实实引了《数据权限管理办法》第 2 条，
+                # 而前端那条引用栏（newbie.html 读 r.citations）**是空的**。
+                # 答案有依据，界面却显示不出依据 —— 对一个"凡事要有出处"的产品来说，
+                # 这个空白出现在最不该空的地方。
+                if tc["name"] == "knowledge_search" and tr.ok:
+                    kb_hits.extend((payload or {}).get("hits") or [])
+
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc["id"],
@@ -339,6 +351,7 @@ def _make_act(domain: str):
             "observations": obs,
             "pending_action": pending,
             "answer": final_text,
+            "citations": prompts.citation_line(kb_hits),
             "route": "act",
             "tier_used": "tier1+tier2",
             "spans": spans,
