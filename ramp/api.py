@@ -22,7 +22,7 @@ from fastapi import FastAPI, HTTPException, Cookie, Depends, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from . import auth, config, db, escalate, memory, proactive, runtime, trace, knowledge
+from . import auth, config, db, demo, escalate, external, knowledge, memory, proactive, runtime, trace
 
 app = FastAPI(title="爬坡 Ramp API", version="0.1.0")
 
@@ -743,43 +743,141 @@ def admin_overview(p: auth.Principal = Depends(require("admin"))) -> dict[str, A
 # ------------------------------------------------------------------ 外部系统
 @app.get("/api/admin/external")
 def admin_external(p: auth.Principal = Depends(require("admin"))) -> dict[str, Any]:
-    """外部系统接入状态。
+    """外部系统接入状态 + 可维护的配置。
 
-    Ramp 有四个工具要读企业已有的系统：HR 档案、组织架构、IT 权限、工单。
-    这一页说明**每个系统接没接、没接时 Agent 会怎么回答**。
+    四个系统按**字段粒度**判断能不能用，不是整个系统一刀切：
+    转正日期、年假、汇报线这些能从入职日期和账号表算出来，永远可用；
+    社保、公积金、岗位权限清单要管理员录，没录就诚实说查不到。
 
-    演示环境里它们全部未接入 —— 这是刻意的。原来这里塞了一整套虚构数据
-    （某人的社保状态、某人的权限清单、一个叫李敏的审批人），
-    看起来功能完整，代价是**系统里没有一条数据是真的**，
-    看的人分不清哪些是产品能力、哪些是编的剧本。
-
-    未接入时工具不会编，会明确说"这项需要查 XX 系统，当前未接入"。
-    **一个诚实的"我查不到"，比一个编出来的答案有用得多。**
+    这里返回的所有"人"都是 username，前端渲染时显示对应账号的姓名。
+    **配置里存名字是上一版出「李敏」那个 bug 的根源** ——
+    名字一旦离开账号表，就再也没有东西保证它对应一个真实存在的人。
     """
     from .tools import registry
 
-    systems = [
-        {"key": "hr_system", "name": "HR 档案系统",
-         "reads": "社保 / 公积金 / 入职材料 / 转正日期",
-         "tool": "hr_query", "connected": False},
-        {"key": "org_directory", "name": "组织架构",
-         "reads": "汇报线 / HRBP / IT 服务台联系方式",
-         "tool": "org_lookup", "connected": False},
-        {"key": "it_entitlements", "name": "IT 权限系统",
-         "reads": "已开通账号 / 岗位应有权限 / 待审批",
-         "tool": "it_entitlements", "connected": False},
-        {"key": "it_servicedesk", "name": "IT 工单系统",
-         "reads": "提交权限申请工单（写操作，需人工确认）",
-         "tool": "it_create_ticket", "connected": False},
-    ]
-    return {
-        "systems": systems,
-        "tools": [{"name": t.name, "writes": t.writes,
-                   "domains": list(t.domains)} for t in registry.for_domain(None)],
-        "note": ("演示环境未接入任何外部系统。Ramp 通过工具只读访问企业已有的 "
-                 "HR / OA / 工单系统，不拥有也不维护这些数据 —— "
-                 "谁拥有数据，谁负责它的正确性。"),
-    }
+    ses = db.get_session()
+    try:
+        conf = external.all_config(ses)
+        return {
+            "mode": external.mode(),
+            "systems": external.status(ses),
+            "config": {k: v for k, v in conf.items() if not k.startswith("_")},
+            "demo_loaded": demo.is_loaded(ses),
+            "demo_manifest": demo.manifest(ses),
+            "mentors": [{"username": u.username, "label": u.label()}
+                        for u in _people(ses)],
+            "tools": [{"name": t.name, "writes": t.writes,
+                       "domains": list(t.domains)} for t in registry.for_domain(None)],
+            "note": ("Ramp 通过工具只读访问企业已有的 HR / OA / 工单系统，"
+                     "不拥有也不维护这些数据 —— 谁拥有数据，谁负责它的正确性。"
+                     "演示环境用内置实现顶替，数据来源与真实系统一致："
+                     "人来自账号表，能算的现算，只有制度性事实才录入。"),
+        }
+    finally:
+        ses.close()
+
+
+def _people(ses) -> list:
+    """能被指派为联系人/审批人的账号 —— 必须是真实存在且在职的。"""
+    rows = ses.query(auth.User).filter(auth.User.active.is_(True)).all()
+    return [external.Person(u.username, u.display_name, u.title or "", u.team or "")
+            for u in rows]
+
+
+@app.post("/api/admin/external/config")
+def admin_external_save(body: dict[str, Any],
+                        p: auth.Principal = Depends(require("admin"))) -> dict[str, Any]:
+    """保存一项外部系统配置。"""
+    key = str(body.get("key") or "")
+    if key not in external.DEFAULT_CONFIG:
+        raise HTTPException(400, f"未知配置项：{key}")
+    ses = db.get_session()
+    try:
+        external.set_config(ses, key, body.get("value"))
+        ses.commit()
+        return {"ok": True, "systems": external.status(ses)}
+    finally:
+        ses.close()
+
+
+@app.get("/api/admin/profile/{employee_id}")
+def admin_profile_get(employee_id: str,
+                      p: auth.Principal = Depends(require("admin"))) -> dict[str, Any]:
+    """某个人在外部系统里的业务状态（社保 / 公积金 / 材料 / 已开通权限）。"""
+    ses = db.get_session()
+    try:
+        row = external.profile(ses, employee_id)
+        conf = external.all_config(ses)
+        emp = ses.get(db.Employee, employee_id)
+        return {
+            "employee_id": employee_id,
+            "profile": {
+                "social_status": row.social_status if row else "unknown",
+                "social_from": row.social_from.isoformat() if row and row.social_from else None,
+                "fund_status": row.fund_status if row else "unknown",
+                "fund_base": row.fund_base if row else None,
+                "docs": (row.docs if row else None) or [],
+                "granted": (row.granted if row else None) or [],
+                "leave_used": row.leave_used if row else 0.0,
+            },
+            "doc_catalog": conf.get("doc_catalog") or {},
+            "entitlement_catalog": conf.get("entitlement_catalog") or {},
+            # 算出来的部分一并回传，让管理员看到"这些不用录"
+            "derived": ({
+                "probation": external.probation_of(emp.onboard_date),
+                "leave": external.annual_leave_of(emp.onboard_date,
+                                                  row.leave_used if row else 0.0),
+                "social_start": external.social_start_month(emp.onboard_date),
+            } if emp and emp.onboard_date else None),
+        }
+    finally:
+        ses.close()
+
+
+@app.post("/api/admin/profile/{employee_id}")
+def admin_profile_save(employee_id: str, body: dict[str, Any],
+                       p: auth.Principal = Depends(require("admin"))) -> dict[str, Any]:
+    ses = db.get_session()
+    try:
+        if ses.get(auth.User, employee_id) is None:
+            raise HTTPException(404, "没有这个账号")
+        row = external.profile(ses, employee_id)
+        if row is None:
+            row = db.ExtProfile(employee_id=employee_id)
+            ses.add(row)
+        for f in ("social_status", "fund_status"):
+            if body.get(f):
+                setattr(row, f, str(body[f]))
+        if "fund_base" in body:
+            row.fund_base = int(body["fund_base"]) if body.get("fund_base") else None
+        if "social_from" in body:
+            v = body.get("social_from")
+            row.social_from = date.fromisoformat(v) if v else None
+        for f in ("docs", "granted"):
+            if f in body:
+                setattr(row, f, list(body.get(f) or []))
+        if "leave_used" in body:
+            row.leave_used = float(body.get("leave_used") or 0)
+        ses.commit()
+        return {"ok": True}
+    finally:
+        ses.close()
+
+
+@app.post("/api/admin/demo")
+def admin_demo(body: dict[str, Any],
+               p: auth.Principal = Depends(require("admin"))) -> dict[str, Any]:
+    """一键装载 / 清空演示数据。
+
+    装载会**创建真实账号** —— 它们出现在成员列表里、能登录、能被改被删。
+    清空只删装载器自己建的东西，**你自己注册的账号一律不碰**。
+    """
+    action = str(body.get("action") or "")
+    if action == "load":
+        return demo.load()
+    if action == "clear":
+        return demo.clear()
+    raise HTTPException(400, "action 只能是 load 或 clear")
 
 
 @app.get("/api/admin/knowledge")

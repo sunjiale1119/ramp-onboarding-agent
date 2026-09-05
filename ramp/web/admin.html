@@ -83,17 +83,37 @@
 
   <!-- ---------------- 外部系统 ---------------- -->
   <div class="pane" data-pane="x"><div class="shell"><div class="pad">
-    <div class="note warn" style="margin-bottom:16px"><span class="nt">全部未接入 · 这是刻意的</span>
-      Ramp 有四个工具要读企业<b>已有</b>的系统。演示环境一个都没接。<br><br>
-      这里原来塞了一整套虚构数据：某人的社保状态、某人的权限清单、
-      一个叫「李敏」的审批人。Agent 答得很流畅，直到有人去后台核对——
-      <b>系统里根本没有李敏这个人</b>。<br><br>
-      现在清空了。工具查不到时会<b>说清楚查的是哪个系统、为什么查不到</b>，
-      不会编。<b>一个诚实的「我查不到」，比一个编出来的答案有用得多</b>——
-      前者你知道下一步做什么，后者你会照着错的信息去办事。
+    <div class="note" style="margin-bottom:14px"><span class="nt">四个系统按字段解锁，不是整体开关</span>
+      转正日期、年假额度、汇报线这些<b>能从入职日期和账号表算出来</b>，永远可用，不用录。<br>
+      社保、公积金、岗位权限清单要在这里配，<b>配一项解锁一项</b>；没配过的字段
+      Agent 会诚实说查不到，不会编。<br><br>
+      配置里所有的「人」存的都是<b>账号</b>，显示时去账号表解析。
+      上一版这里存的是名字，于是出现了一个叫「李敏」的审批人——
+      <b>而系统里根本没有李敏这个人</b>。名字一旦离开账号表，
+      就再也没有东西保证它对应一个真实存在的人。
     </div>
+
+    <div class="row" style="gap:8px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
+      <button class="pri" id="x-load">一键装载演示数据</button>
+      <button id="x-clear">清空演示数据</button>
+      <span class="hint" id="x-demo"></span>
+    </div>
+
     <div class="tw"><table id="x-sys"></table></div>
-    <h3 style="font-size:15px;margin:22px 0 10px">已注册的工具</h3>
+
+    <h3 style="font-size:15px;margin:22px 0 8px">联系人 · 指向真实账号</h3>
+    <p class="hint" style="margin-bottom:8px">Agent 回答「HRBP 怎么联系」时报的就是这里指定的人。</p>
+    <div class="tw"><table id="x-contacts"></table></div>
+
+    <h3 style="font-size:15px;margin:22px 0 8px">岗位应有权限</h3>
+    <p class="hint" style="margin-bottom:8px">Day 3 的权限差额提醒、「我还缺哪些权限」都基于这张表。</p>
+    <div class="tw"><table id="x-roles"></table></div>
+
+    <h3 style="font-size:15px;margin:22px 0 8px">资源 → 审批账号</h3>
+    <p class="hint" style="margin-bottom:8px">提工单时的审批人。留空则显示「由 IT 服务台按资源自动分派」。</p>
+    <div class="tw"><table id="x-appr"></table></div>
+
+    <h3 style="font-size:15px;margin:22px 0 8px">已注册的工具</h3>
     <div class="tw"><table id="x-tools"></table></div>
     <p class="hint" style="margin-top:12px" id="x-note"></p>
   </div></div></div>
@@ -139,6 +159,24 @@
           <div><label>领域</label><select id="m-domain"></select></div>
         </div>
         <div id="m-mentor-wrap"><label>Mentor</label><select id="m-mentor"></select></div>
+
+        <div id="m-ext" style="margin-top:14px;border-top:1px solid var(--rule);padding-top:12px">
+          <label style="display:flex;align-items:center;gap:8px">
+            外部系统档案
+            <span class="hint" style="font-weight:400">Agent 查「我的社保交了吗」读的就是这里</span>
+          </label>
+          <p class="hint" id="m-derived" style="margin:2px 0 10px"></p>
+          <div class="kbrow">
+            <div><label>社保</label><select id="m-social"></select></div>
+            <div><label>公积金</label><select id="m-fund"></select></div>
+          </div>
+          <div id="m-docs-wrap" style="margin-top:8px">
+            <label>入职材料</label><div id="m-docs"></div>
+          </div>
+          <div id="m-grant-wrap" style="margin-top:8px">
+            <label>已开通权限</label><div id="m-grant"></div>
+          </div>
+        </div>
       </div>
       <p class="hint" id="m-hint" style="margin:0"></p>
     </div>
@@ -272,6 +310,52 @@ function openEdit(u) {
       }).join('');
   $('#m-role').onchange();
   $('#back').classList.add('on');
+  loadProfile(u.username);
+}
+
+var PROF = null;
+var STATUS_OPTS = [
+  ['unknown', '未录入 · Agent 会说查不到'],
+  ['paid', '已缴纳'],
+  ['pending', '办理中'],
+  ['not_started', '尚未开始']
+];
+
+function statusSel(id, cur) {
+  $(id).innerHTML = STATUS_OPTS.map(function (o) {
+    return '<option value="' + o[0] + '"' + (o[0] === cur ? ' selected' : '') +
+      '>' + o[1] + '</option>';
+  }).join('');
+}
+
+function boxes(host, catalog, chosen, attr) {
+  var keys = Object.keys(catalog || {});
+  $(host).innerHTML = keys.length ? keys.map(function (k) {
+    return '<label class="ckbx"><input type="checkbox" data-' + attr + '="' + esc(k) + '"' +
+      ((chosen || []).indexOf(k) >= 0 ? ' checked' : '') + '> ' + esc(catalog[k]) + '</label>';
+  }).join('') : '<span class="hint">还没有目录。到「外部系统」页签装载演示数据可以看到一份示例。</span>';
+}
+
+async function loadProfile(username) {
+  $('#m-derived').textContent = '';
+  try {
+    PROF = await api('/admin/profile/' + encodeURIComponent(username));
+  } catch (e) { PROF = null; }
+  var isNew = ($('#m-role').value === 'newbie' || $('#m-role').value === 'mentor');
+  $('#m-ext').style.display = (PROF && isNew) ? '' : 'none';
+  if (!PROF || !isNew) return;
+  var p = PROF.profile;
+  statusSel('#m-social', p.social_status);
+  statusSel('#m-fund', p.fund_status);
+  boxes('#m-docs', PROF.doc_catalog, p.docs, 'doc');
+  boxes('#m-grant', PROF.entitlement_catalog, p.granted, 'grant');
+  if (PROF.derived) {
+    var d = PROF.derived;
+    $('#m-derived').textContent =
+      '以下三项算得出来，不用录：转正 ' + d.probation.probation_end +
+      '（第 ' + d.probation.day_index + ' 天）· 年假 ' + d.leave.total +
+      ' 天 · 社保应从 ' + d.social_start.month + ' 起缴';
+  }
 }
 
 $('#m-role').onchange = function () {
@@ -287,6 +371,7 @@ $('#m-role').onchange = function () {
     admin: '管理员：管账号和配置，<b>看不到任何人的提问原文</b>。'
   };
   $('#m-hint').innerHTML = hints[r] || '';
+  if ($('#m-ext')) { $('#m-ext').style.display = (needs && PROF) ? '' : 'none'; }
 };
 
 $('#m-cancel').onclick = function () { $('#back').classList.remove('on'); };
@@ -311,6 +396,18 @@ $('#m-save').onclick = async function () {
   $('#m-save').disabled = true;
   try {
     var r = await api('/admin/users/update', j('POST', body));
+    if (PROF && (role === 'newbie' || role === 'mentor')) {
+      await api('/admin/profile/' + encodeURIComponent(mUser.username), j('POST', {
+        social_status: $('#m-social').value,
+        fund_status: $('#m-fund').value,
+        docs: Array.prototype.map.call(
+          document.querySelectorAll('#m-docs input:checked'),
+          function (x) { return x.dataset.doc; }),
+        granted: Array.prototype.map.call(
+          document.querySelectorAll('#m-grant input:checked'),
+          function (x) { return x.dataset.grant; })
+      }));
+    }
     toast(r.message);
     MENTORS = r.mentors || MENTORS;
     renderUsers(r.users);
@@ -348,33 +445,145 @@ $('#u-tab').onclick = async function (e) {
 };
 
 /* ---------------- 外部系统 ---------------- */
+var EXT = null;
+
+function personOpts(sel) {
+  return '<option value="">— 未指定 —</option>' + (EXT.mentors || []).map(function (m) {
+    return '<option value="' + esc(m.username) + '"' +
+      (m.username === sel ? ' selected' : '') + '>' + esc(m.label) + '</option>';
+  }).join('');
+}
+
+async function saveExt(key, value) {
+  await api('/admin/external/config', j('POST', { key: key, value: value }));
+  await loadExternal();
+}
+
+function renderExt() {
+  var d = EXT, c = d.config || {};
+
+  $('#x-demo').textContent = d.demo_loaded
+    ? ('演示数据已装载于 ' + (d.demo_manifest.loaded_on || '') +
+       '，共 ' + (d.demo_manifest.accounts || []).length + ' 个账号（密码 ramp2026）')
+    : '未装载。装载会创建真实账号，它们会出现在成员列表里、能登录。';
+
+  $('#x-sys').innerHTML =
+    '<thead><tr><th>系统</th><th>不用配就能用</th><th>要配才能用</th><th>状态</th></tr></thead><tbody>' +
+    d.systems.map(function (x) {
+      return '<tr><td><b>' + esc(x.system) + '</b><br><span class="n" style="font-size:11px">' +
+        esc(x.tool) + '</span></td>' +
+        '<td style="font-size:13px">' + esc(x.always) + '</td>' +
+        '<td style="font-size:13px">' + esc(x.needs) + '</td>' +
+        '<td>' + (x.ready ? '<span class="pill on">可用</span>'
+                          : '<span class="pill off">未配置</span>') +
+        '<br><span class="hint">' + esc(x.detail) + '</span></td></tr>';
+    }).join('') + '</tbody>';
+
+  var labels = { hrbp: 'HRBP', it_desk: 'IT 服务台', admin_office: '行政' };
+  var contacts = c.contacts || {};
+  $('#x-contacts').innerHTML =
+    '<thead><tr><th>角色</th><th>指派给</th></tr></thead><tbody>' +
+    Object.keys(labels).map(function (k) {
+      return '<tr><td>' + labels[k] + '</td><td><select data-contact="' + k + '">' +
+        personOpts(contacts[k]) + '</select></td></tr>';
+    }).join('') + '</tbody>';
+
+  var cat = c.entitlement_catalog || {};
+  var roles = c.role_entitlements || {};
+  var keys = Object.keys(cat);
+  $('#x-roles').innerHTML = keys.length
+    ? '<thead><tr><th>岗位</th><th>应有权限</th></tr></thead><tbody>' +
+      Object.keys(roles).map(function (r) {
+        return '<tr><td>' + esc(r === '*' ? '（其他岗位）' : r) + '</td><td>' +
+          keys.map(function (k) {
+            return '<label class="ckbx"><input type="checkbox" data-role="' + esc(r) +
+              '" value="' + esc(k) + '"' +
+              ((roles[r] || []).indexOf(k) >= 0 ? ' checked' : '') + '> ' +
+              esc(cat[k]) + '</label>';
+          }).join('') + '</td></tr>';
+      }).join('') + '</tbody>'
+    : '<tbody><tr><td class="hint">还没有权限项目录。装载演示数据可以看到一份示例。</td></tr></tbody>';
+
+  var ap = c.resource_approvers || {};
+  $('#x-appr').innerHTML = keys.length
+    ? '<thead><tr><th>资源</th><th>审批账号</th><th>时长（工作日）</th></tr></thead><tbody>' +
+      keys.map(function (k) {
+        var a = ap[k] || {};
+        return '<tr><td>' + esc(cat[k]) + '<br><span class="n" style="font-size:11px">' +
+          esc(k) + '</span></td>' +
+          '<td><select data-appr="' + esc(k) + '">' + personOpts(a.username) + '</select></td>' +
+          '<td><input type="number" min="0" max="30" style="width:70px" data-sla="' +
+          esc(k) + '" value="' + (a.sla_days == null ? '' : a.sla_days) + '"></td></tr>';
+      }).join('') + '</tbody>'
+    : '<tbody><tr><td class="hint">还没有权限项目录。</td></tr></tbody>';
+
+  $('#x-tools').innerHTML =
+    '<thead><tr><th>工具</th><th>可见域</th><th>写操作</th></tr></thead><tbody>' +
+    d.tools.map(function (t) {
+      return '<tr><td class="n">' + esc(t.name) + '</td>' +
+        '<td>' + t.domains.map(esc).join(' · ') + '</td>' +
+        '<td>' + (t.writes
+          ? '<span class="pill off">是 · 执行前必须人工确认</span>'
+          : '<span class="pill on">否 · 只读</span>') + '</td></tr>';
+    }).join('') + '</tbody>';
+  $('#x-note').textContent = d.note;
+}
+
 async function loadExternal() {
   try {
-    var d = await api('/admin/external');
-    $('#x-sys').innerHTML =
-      '<thead><tr><th>系统</th><th>Ramp 从它读什么</th><th>对应工具</th><th>状态</th></tr></thead><tbody>' +
-      d.systems.map(function (x) {
-        return '<tr><td><b>' + esc(x.name) + '</b></td>' +
-          '<td style="font-size:13px">' + esc(x.reads) + '</td>' +
-          '<td class="n">' + esc(x.tool) + '</td>' +
-          '<td>' + (x.connected ? '<span class="pill on">已接入</span>'
-                                : '<span class="pill off">未接入</span>') + '</td></tr>';
-      }).join('') + '</tbody>';
-
-    $('#x-tools').innerHTML =
-      '<thead><tr><th>工具</th><th>可见域</th><th>写操作</th></tr></thead><tbody>' +
-      d.tools.map(function (t) {
-        return '<tr><td class="n">' + esc(t.name) + '</td>' +
-          '<td>' + t.domains.map(esc).join(' · ') + '</td>' +
-          '<td>' + (t.writes
-            ? '<span class="pill off">是 · 执行前必须人工确认</span>'
-            : '<span class="pill on">否 · 只读</span>') + '</td></tr>';
-      }).join('') + '</tbody>';
-    $('#x-note').textContent = d.note;
+    EXT = await api('/admin/external');
+    renderExt();
   } catch (e) {
     $('#x-sys').innerHTML = '<tbody><tr><td class="err">' + esc(e.message) + '</td></tr></tbody>';
   }
 }
+
+document.addEventListener('change', function (e) {
+  var t = e.target;
+  if (!EXT) return;
+  if (t.dataset.contact != null) {
+    var c = Object.assign({}, EXT.config.contacts || {});
+    if (t.value) { c[t.dataset.contact] = t.value; } else { delete c[t.dataset.contact]; }
+    saveExt('contacts', c);
+  } else if (t.dataset.role != null) {
+    var roles = JSON.parse(JSON.stringify(EXT.config.role_entitlements || {}));
+    var r = t.dataset.role;
+    var list = roles[r] || [];
+    var i = list.indexOf(t.value);
+    if (t.checked && i < 0) { list.push(t.value); }
+    if (!t.checked && i >= 0) { list.splice(i, 1); }
+    roles[r] = list;
+    saveExt('role_entitlements', roles);
+  } else if (t.dataset.appr != null || t.dataset.sla != null) {
+    var key = t.dataset.appr || t.dataset.sla;
+    var all = JSON.parse(JSON.stringify(EXT.config.resource_approvers || {}));
+    var cur = all[key] || {};
+    if (t.dataset.appr != null) {
+      if (t.value) { cur.username = t.value; } else { delete cur.username; }
+    } else {
+      if (t.value) { cur.sla_days = +t.value; } else { delete cur.sla_days; }
+    }
+    if (Object.keys(cur).length) { all[key] = cur; } else { delete all[key]; }
+    saveExt('resource_approvers', all);
+  }
+});
+
+document.addEventListener('click', async function (e) {
+  if (e.target.id !== 'x-load' && e.target.id !== 'x-clear') return;
+  var load = e.target.id === 'x-load';
+  if (!load && !confirm('清空演示数据？只会删除装载器创建的账号与配置，你自己注册的账号不受影响。')) return;
+  e.target.disabled = true;
+  try {
+    var r = await api('/admin/demo', j('POST', { action: load ? 'load' : 'clear' }));
+    alert(r.message || '完成');
+    await loadExternal();
+    if (typeof loadUsers === 'function') { loadUsers(); }
+  } catch (err) {
+    alert('失败：' + err.message);
+  } finally {
+    e.target.disabled = false;
+  }
+});
 
 /* ---------------- 知识库 ---------------- */
 function renderKB(items) {

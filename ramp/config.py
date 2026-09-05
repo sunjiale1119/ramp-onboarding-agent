@@ -146,6 +146,19 @@ SOURCE_LEVEL_CAP = {"L1": 1.00, "L2": 0.85, "L3": 0.45}
 
 # 过期知识的降权系数
 SEMANTIC_FLOOR = float(os.getenv("RAMP_SEMANTIC_FLOOR", "0.55"))
+
+
+# ------------------------------------------------------------------ 外部系统
+# off / builtin / live —— 见 ramp/external.py 的模块文档。
+#
+# 默认 builtin，但 builtin **不等于"一定查得到"**：它是数据驱动的，
+# 没配过的字段照样走"未接入"分支。也就是说全新部署的行为和 off 一样，
+# 管理员在后台录一项就解锁一项。
+#
+# off 这一档必须保留：「外部系统没接时诚实说查不到、绝不编值」是一项
+# 要被测试的能力，评测里 cross_system 那 12 题考的就是它。
+# 加了内置实现就把这条路径丢掉，是亏的。
+EXTERNAL_MODE = os.getenv("RAMP_EXTERNAL_MODE", "builtin").strip().lower()
 """语义相关性**绝对下限**。低于它的条目一律不能作答，无论混合分多高。
 
 ## 为什么必须有这道闸

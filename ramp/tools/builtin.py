@@ -7,17 +7,20 @@
     it_entitlements    it     只读
     it_create_ticket   it     **写入** → 强制人工确认
 
-外部系统全部走 seed/mock_systems.json 的假数据，并保留了一个
-超时分支（salary-system），用来验证工具失败后的降级文案。
+四个外部系统（HR 档案 / 组织架构 / IT 权限 / IT 工单）不在这里实现 ——
+本模块只负责**工具契约**（给模型看的 schema、参数校验、错误翻译），
+数据一律走 ramp/external.py 的适配层，由它决定是内置实现还是真接入。
+
+这样分是因为两件事变化的原因不同：工具描述改动是为了让模型调得更准，
+外部系统改动是为了对接不同企业的后台。混在一起改一处动两边。
 """
 
 from __future__ import annotations
 
 import json
-from datetime import date, timedelta
 from typing import Any
 
-from .. import config
+from .. import config, db, external
 from . import ToolError, registry
 
 
@@ -47,14 +50,21 @@ def _not_connected(system: str, what: str) -> ToolError:
     )
 
 
-_MOCK: dict[str, Any] | None = None
+def _translate(exc: external.NotConnected) -> ToolError:
+    """把适配层的"没有可用数据"翻译成给用户看的话。"""
+    return _not_connected(exc.system, exc.what)
 
 
 def mock() -> dict[str, Any]:
+    """只剩 onboarding_timeline 还从种子文件读 —— 那是产品自带的
+    30 天节点内容，不属于任何外部系统。"""
     global _MOCK
     if _MOCK is None:
         _MOCK = json.loads((config.SEED_DIR / "mock_systems.json").read_text(encoding="utf-8"))
     return _MOCK
+
+
+_MOCK: dict[str, Any] | None = None
 
 
 def _emp_id(ctx: dict[str, Any]) -> str:
@@ -112,12 +122,13 @@ def knowledge_search(query: str, top_k: int = 3, *, _context: dict[str, Any]) ->
 )
 def hr_query(field: str, *, _context: dict[str, Any]) -> dict[str, Any]:
     eid = _emp_id(_context)
-    rec = mock()["hr_system"].get(eid)
-    if rec is None:
-        raise _not_connected("HR 档案系统", "社保、公积金、入职材料、转正日期这类信息")
-    if field not in rec:
-        raise ToolError(f"未知字段: {field}")
-    return {"field": field, "value": rec[field], "source": "hr_system（只读）"}
+    ses = db.get_session()
+    try:
+        return external.hr_field(ses, eid, field)
+    except external.NotConnected as exc:
+        raise _translate(exc) from None
+    finally:
+        ses.close()
 
 
 # ------------------------------------------------------------------ 组织架构
@@ -138,17 +149,15 @@ def hr_query(field: str, *, _context: dict[str, Any]) -> dict[str, Any]:
     domains=("hr", "it", "biz"),
 )
 def org_lookup(what: str, *, _context: dict[str, Any]) -> dict[str, Any]:
-    d = mock()["org_directory"]
-    if what == "contacts":
-        c = d.get("contacts") or {}
-        if not c:
-            raise _not_connected("组织架构", "HRBP、IT 服务台、行政的联系方式")
-        return {"contacts": c}
-    eid = _emp_id(_context)
-    rec = d.get(eid)
-    if rec is None:
-        raise _not_connected("组织架构", "汇报线、团队、带教关系")
-    return {"me": rec}
+    ses = db.get_session()
+    try:
+        if what == "contacts":
+            return external.org_contacts(ses)
+        return external.org_me(ses, _emp_id(_context))
+    except external.NotConnected as exc:
+        raise _translate(exc) from None
+    finally:
+        ses.close()
 
 
 # ------------------------------------------------------------------ IT 权限
@@ -168,34 +177,13 @@ def org_lookup(what: str, *, _context: dict[str, Any]) -> dict[str, Any]:
 )
 def it_entitlements(resource: str | None = None, *, _context: dict[str, Any]) -> dict[str, Any]:
     eid = _emp_id(_context)
-    desk = mock()["it_servicedesk"]
-
-    # 故障演练：查 salary-system 时模拟超时，用来验证降级路径
-    if resource == desk.get("failure_simulation", {}).get("timeout_on_resource"):
-        raise ToolError(
-            "上游系统超时",
-            user_message="薪资系统这会儿没响应。这类信息我也不提供查询，请直接联系 HRBP 王倩。",
-        )
-
-    ent = desk["entitlements"].get(eid)
-    if ent is None:
-        raise _not_connected("IT 权限系统", "已开通账号、岗位应有权限、待审批项")
-
-    granted = set(ent["granted"])
-    required = set(ent["required_by_role"])
-    missing = sorted(required - granted)
-
-    out: dict[str, Any] = {
-        "granted": sorted(granted),
-        "missing": missing,
-        "pending": ent.get("pending", []),
-    }
-    if resource:
-        ap = desk["approvers"].get(resource)
-        out["resource"] = resource
-        out["already_granted"] = resource in granted
-        out["approver"] = ap or {"name": "未知", "title": "请咨询 IT 服务台"}
-    return out
+    ses = db.get_session()
+    try:
+        return external.entitlements(ses, eid, resource)
+    except external.NotConnected as exc:
+        raise _translate(exc) from None
+    finally:
+        ses.close()
 
 
 # ------------------------------------------------------------------ IT 工单（写入）
@@ -229,48 +217,16 @@ def it_create_ticket(
     _context: dict[str, Any],
 ) -> dict[str, Any]:
     eid = _emp_id(_context)
-    desk = mock()["it_servicedesk"]
-    org = mock()["org_directory"].get(eid, {})
-
-    # 审批人来自外部工单系统的配置。**未接入时不能瞎填一个名字。**
-    #
-    # 这一行以前的默认值会造出一个具体的人：`{"name": "李敏", ...}`
-    # 来自虚构配置，于是 Agent 回答"审批人李敏（数据平台负责人）"，
-    # 用户去后台核对 —— 系统里根本没有李敏这个人。
-    #
-    # 提交一个工单却说不清谁来批，本身是可接受的（真实工单系统会自动分派）；
-    # 说出一个不存在的人名，不可接受。**宁可说"待分派"，不可以编一个人。**
-    ap = (desk.get("approvers") or {}).get(resource)
-    approver = (f"{ap['name']}（{ap.get('title', '')}）" if ap
-                else "由 IT 服务台按资源自动分派")
-    sla = ap.get("sla_days", 2) if ap else None
-
-    who = _context.get("employee_name") or eid
-    team_role = " · ".join(x for x in (org.get("team"), org.get("role")) if x)
-    fields = {
-        "系统": "IT 服务台 · 权限申请",
-        "申请人": f"{who}（{team_role}）" if team_role else str(who),
-        "权限项": resource,
-        "理由": reason,
-        "审批人": approver,
-        "时长": f"{duration_days} 天，到期自动回收",
-        "预计时长": f"{sla} 个工作日" if sla else "以 IT 服务台的分派结果为准",
-    }
-
-    if _preview:
-        # 只回显，不落库——真正的提交在用户确认之后
-        return {"preview": True, "fields": fields}
-
-    no = desk.get("next_ticket_no", 10001)
-    desk["next_ticket_no"] = no + 1
-    ticket = {
-        "ticket_id": f"IT-{no}",
-        "fields": fields,
-        "status": "pending_approval",
-        "submitted_on": date.today().isoformat(),
-        "revocable_until_minutes": 5,
-    }
-    if sla:
-        ticket["expected_by"] = (date.today() + timedelta(days=sla)).isoformat()
-    desk.setdefault("tickets", []).append(ticket)
-    return ticket
+    ses = db.get_session()
+    try:
+        if _preview:
+            # 只回显，不落库 —— 真正的提交在用户确认之后。
+            # 审批人由适配层从 username 解析成真人；解析不出就是
+            # "由 IT 服务台按资源自动分派"，**不编名字**。
+            return {"preview": True,
+                    "fields": external.ticket_fields(ses, eid, resource, reason, duration_days)}
+        return external.create_ticket(ses, eid, resource, reason, duration_days)
+    except external.NotConnected as exc:
+        raise _translate(exc) from None
+    finally:
+        ses.close()

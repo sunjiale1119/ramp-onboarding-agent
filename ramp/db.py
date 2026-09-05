@@ -1,6 +1,6 @@
 """持久化层：SQLAlchemy 模型 + MySQL 连接。
 
-八张表，对应产品里的八种状态：
+十一张表，对应产品里的十一种状态：
     employees      新人档案（域、mentor、入职日期）
     knowledge      知识条目（来源分级、有效期、域、向量）
     memories       三层记忆（情景 / 语义 / 程序）+ 可见性
@@ -9,6 +9,9 @@
     traces         调用链留痕（耗时、档位、token、成本）
     escalations    升级卡片（未命中 → Mentor → 沉淀）
     push_log       主动推送记录（用来算打扰预算）
+    ext_profiles   外部系统里某个人的业务状态（社保 / 公积金 / 材料 / 已开通权限）
+    ext_config     全局映射（岗位→应有权限、资源→审批账号、联系人→账号）
+    tickets        IT 工单
 
 LangGraph 的 checkpoint 不在这里——它由 checkpointer 单独持有，
 这是刻意的状态所有权划分：会话文本归 messages，暂停中的图归 checkpointer。
@@ -192,6 +195,83 @@ class PushLog(Base):
     kind: Mapped[str] = mapped_column(String(32))
     content: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+# ------------------------------------------------------------------ 外部系统
+#
+# 这三张表撑起「HR 档案 / 组织架构 / IT 权限 / IT 工单」四个外部系统的
+# 内置实现。设计原则只有一条：
+#
+#     **人必须是真实账号，能算的算出来，只有制度性事实才录入。**
+#
+# 上一版这些数据全放在 seed/mock_systems.json 里，里面有一整套编出来的
+# 人：审批人「李敏」、Mentor「陈昊」、HRBP「王倩」。Agent 答得很流畅，
+# 直到管理员登录后台去核对，发现**系统里根本没有李敏这个人**。
+#
+# 所以现在没有任何一张表存人名：ExtConfig 存的是 username，
+# 要显示的时候去 users 表解析。人被删了、改名了，这里跟着变，
+# 不可能再出现「答案里的人在系统里不存在」。
+
+
+class ExtProfile(Base):
+    """外部系统里属于「某个人」的业务状态。
+
+    只放**算不出来**的东西。转正日期、试用期还剩几天、年假额度
+    都能从 onboard_date 推出来，不进这张表 —— 存一份算得出的值，
+    就等于制造了一个会和事实不一致的副本。
+    """
+
+    __tablename__ = "ext_profiles"
+
+    employee_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # unknown = 没录过，工具会诚实说查不到；不是 "未参保"
+    social_status: Mapped[str] = mapped_column(String(16), default="unknown")
+    social_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    fund_status: Mapped[str] = mapped_column(String(16), default="unknown")
+    fund_base: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    docs: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    granted: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    leave_used: Mapped[float] = mapped_column(Float, default=0.0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ExtConfig(Base):
+    """全局映射表：岗位→应有权限、资源→审批账号、联系人→账号。
+
+    键值对而不是各开一张表，因为这些映射的形状还会变，
+    而它们的读写模式完全一样（管理员整份存、工具整份读）。
+    """
+
+    __tablename__ = "ext_config"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[Any] = mapped_column(JSON)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class Ticket(Base):
+    """IT 工单。
+
+    原来工单塞在 mock_systems.json 那个模块级 dict 里，**进程一重启就没了** ——
+    新人提完工单，刷新页面查「我的待审批」是空的。
+    """
+
+    __tablename__ = "tickets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ticket_id: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    employee_id: Mapped[str] = mapped_column(String(64), index=True)
+    resource: Mapped[str] = mapped_column(String(64))
+    reason: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(24), default="pending_approval")
+    approver: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    duration_days: Mapped[int] = mapped_column(Integer, default=90)
+    submitted_on: Mapped[date] = mapped_column(Date)
+    expected_by: Mapped[date | None] = mapped_column(Date, nullable=True)
 
 
 # ------------------------------------------------------------------ 引擎

@@ -133,22 +133,38 @@ _HONEST_MISS_RE = re.compile(
 )
 
 
-def external_connected() -> bool:
-    """外部系统里有没有真数据。
+@contextmanager
+def external_off():
+    """评测期间把外部系统强制设为 off。
 
-    判断依据是 mock_systems.json 里 hr_system / it_servicedesk 是否为空 ——
-    演示环境清空之后它们就是空的。
+    ## 为什么要钉死
+
+    四个外部系统现在有内置实现了，管理员在后台点一下「装载演示数据」
+    就会从"未接入"变成"可用"。这意味着**同一份代码在两台机器上会跑出
+    不同的基线** —— 一台装了演示数据、一台没装，cross_system 那 12 题
+    考的东西完全不同，而看报告的人不知道。
+
+    这和之前"评测主体写死成某个演示员工"是同一类隐患：
+    **评测依赖环境里恰好是什么状态**。修法也一样 —— 评测自己造环境。
+
+    钉死在 off，考的就是那条最该被守住的性质：
+    **外部系统没接时诚实说查不到、绝不编值**。
+    内置实现那条路径由 scripts/check_external.py 单独覆盖（27 项确定性断言，
+    零模型调用）。
     """
-    try:
-        from ramp.tools.builtin import mock
+    import ramp.config as C
 
-        m = mock()
-        return bool(m.get("hr_system")
-                    or (m.get("it_servicedesk") or {}).get("entitlements")
-                    or {k: v for k, v in (m.get("org_directory") or {}).items()
-                        if k != "contacts"})
-    except Exception:  # noqa: BLE001
-        return False
+    before = C.EXTERNAL_MODE
+    C.EXTERNAL_MODE = "off"
+    try:
+        yield
+    finally:
+        C.EXTERNAL_MODE = before
+
+
+def external_connected() -> bool:
+    """评测里恒为 False —— 见 external_off()。"""
+    return False
 
 
 def judge_cross(item: dict, res: dict) -> dict[str, Any]:
@@ -508,6 +524,9 @@ def run(
     if _own:
         employee_id = _fx.__enter__()
         print(f"  评测主体：{employee_id}（临时创建，跑完删除）")
+    # 外部系统钉死在 off —— 否则后台点没点「装载演示数据」会改变基线。
+    _ext = external_off()
+    _ext.__enter__()
     try:
         from .. import config, runtime
 
@@ -588,6 +607,7 @@ def run(
         report["path"] = str(path)
         return report
     finally:
+        _ext.__exit__(None, None, None)
         if _fx is not None:
             _fx.__exit__(None, None, None)
 
@@ -643,6 +663,7 @@ def summarize(results: list[dict], golden: dict, *, elapsed: float) -> dict[str,
         "config_snapshot": {
             "confidence_threshold": config.CONFIDENCE_THRESHOLD,
             "hybrid_alpha": config.HYBRID_ALPHA,
+            "external_mode": "off（评测钉死，见 external_off）",
             "tier1": config.TIER1,
             "tier2": config.TIER2,
             "pricing_checked_on": config.PRICING_CHECKED_ON,
