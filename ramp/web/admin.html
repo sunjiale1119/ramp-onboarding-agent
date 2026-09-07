@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>爬坡 Ramp · 管理后台</title>
 <link rel="stylesheet" href="/_shared.css">
+<style>
+#back .modal { max-height:calc(100dvh - 40px); display:flex; flex-direction:column; }
+#back .mb { overflow-y:auto; min-height:0; }
+#back .mh, #back .mf { flex-shrink:0; }
+.ckbx { display:inline-flex !important; align-items:center; gap:6px; margin:4px 14px 4px 0; }
+.ckbx input[type="checkbox"] { width:auto; margin:0; display:inline-block; }
+</style>
 </head>
 <body>
 <div class="page">
@@ -140,7 +147,7 @@
 <!-- 设置成员：一个弹窗填完所有 -->
 <div class="back" id="back" role="dialog" aria-modal="true"><div class="modal" style="max-width:520px">
   <div class="mh" style="background:var(--accent-soft)">
-    <b id="m-title" style="color:var(--accent-ink)">设置成员</b>
+    <b id="m-heading" style="color:var(--accent-ink)">设置成员</b>
     <p id="m-sub">角色决定他能进哪个页面；入职信息决定 30 天时间线怎么走。</p>
   </div>
   <div class="mb">

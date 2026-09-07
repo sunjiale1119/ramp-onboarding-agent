@@ -64,7 +64,7 @@ async function mount(current) {
       '<b>知识库为虚构</b>' +
       '<span>知识库来自虚构公司「云启科技」—— 这是刻意的：只有自建才能精确控制 ' +
       'L1/L2/L3 分级与有效期，用来验证分级降权是否真的生效。' +
-      '<b>除此之外没有虚构</b>：成员、入职信息由管理员录入，' +
+      '成员、入职信息由管理员录入；一键装载的演示账号与业务状态用于功能展示，不代表真实员工记录。' +
       '外部系统（HR / 组织架构 / IT 权限）未接入时工具会明说查不到，不会编。</span>' +
       '</div>');
     document.body.insertBefore(b, hd);
@@ -74,7 +74,7 @@ async function mount(current) {
     location.href = '/login';
   };
   api('/health').then(h => {
-    $('#hs').innerHTML = `MySQL ${esc(String(h.db[1]).replace('MySQL ', ''))} · 知识 ${h.knowledge} 条 · 工具 ${h.tools} 个`;
+    $('#hs').innerHTML = `${esc(String(h.db[1]))} · 知识 ${h.knowledge} 条 · 工具 ${h.tools} 个`;
   }).catch(e => { $('#hs').innerHTML = `<span class="err">后端异常：${esc(e.message)}</span>`; });
   return me;
 }
