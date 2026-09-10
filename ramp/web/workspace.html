@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>爬坡 Ramp · 工单与试用</title><link rel="stylesheet" href="/_shared.css">
+<style>
+.work {max-width:1000px;margin:auto}.work section{margin:24px 0;padding:24px;background:var(--card);border:1px solid var(--rule)}
+.work h2,.work h3{margin:0 0 16px}.work label{display:block;margin-top:12px}.work textarea{width:100%;min-height:90px;box-sizing:border-box}
+.work input,.work select,.work textarea{font:inherit;max-width:100%}.work article{padding:16px 0;border-bottom:1px solid var(--rule);overflow-wrap:anywhere}
+.work p{white-space:pre-wrap}.actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.work button{min-height:40px}.work pre{white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:600px){.work section{padding:16px}.work{font-size:16px}}
+</style></head><body><main class="page work">
+<h2>工单与团队试用</h2><p>这里记录实际操作和试用反馈。工单审批仅在本项目内流转，不直接开通企业权限。</p>
+<div class="actions"><button class="btn" id="refresh">刷新结果</button><span id="notice" role="status"></span></div>
+<section><h3>我的申请与待我审批</h3><p>申请人可以取消待审批申请；只有指定审批人可以批准或驳回，不能自审。</p><div id="tickets">正在加载…</div></section>
+<section id="requests-section" hidden><h3>我的操作记录</h3><p>网络中断后先查这里。处理中不等于失败，结果不确定也不等于工单未创建。</p><div id="requests"></div></section>
+<section><h3>提交试用反馈</h3><p>反馈会提供给运营人员。请勿填写工资、身份证、客户资料等敏感信息；不会自动附带聊天原文。</p>
+<form id="feedback-form"><label for="category">试用场景</label><select id="category"><option>知识问答</option><option>个人信息</option><option>权限申请</option><option>人工转交</option><option>其他</option></select>
+<label for="rating">本次体验</label><select id="rating"><option value="3">3 · 基本可用</option><option value="1">1 · 无法完成</option><option value="2">2 · 有明显问题</option><option value="4">4 · 满意</option><option value="5">5 · 很满意</option></select>
+<label for="content">遇到的问题 / 改进建议</label><textarea id="content" required maxlength="2000"></textarea><button class="btn pri" type="submit">提交反馈</button><p id="feedback-status" role="status"></p></form>
+<h3 style="margin-top:24px">反馈处理进展</h3><div id="feedback"></div></section>
+<section id="ops-section" hidden><h3>运维与试用数据</h3><div id="metrics"></div><h3 style="margin-top:24px">最近操作审计</h3><div id="audit"></div></section>
+</main><script src="/_shared.js"></script><script>
+let ME=null;
+const statusName={pending_approval:'待审批',approved:'已批准（待真实 IT 开通）',rejected:'已驳回',cancelled:'已取消',running:'处理中 / 中断待核查',uncertain:'结果不确定，请核查',succeeded:'已完成',open:'待处理',resolved:'已处理'};
+async function load(){
+  $('#notice').textContent='正在刷新…';
+  try{
+    const ts=await api('/tickets');
+    $('#tickets').innerHTML=ts.length?ts.map(t=>'<article><strong>'+esc(t.ticket_id)+' · '+esc(statusName[t.status]||t.status)+'</strong><p>资源：'+esc(t.resource)+'\n申请账号：'+esc(t.employee_id)+'\n审批账号：'+esc(t.approver||'未配置，请联系管理员')+'\n理由：'+esc(t.reason)+'</p><div class="actions">'+(t.can_cancel?'<button class="btn" data-ticket="'+esc(t.ticket_id)+'" data-action="cancel">取消申请</button>':'')+(t.can_decide?'<button class="btn" data-ticket="'+esc(t.ticket_id)+'" data-action="approve">批准</button><button class="btn" data-ticket="'+esc(t.ticket_id)+'" data-action="reject">驳回</button>':'')+'</div></article>').join(''):'<p>暂无工单。</p>';
+    const fs=await api('/pilot/feedback');
+    $('#feedback').innerHTML=fs.length?fs.map(f=>'<article><strong>#'+f.id+' · '+esc(f.category)+' · '+esc(statusName[f.status])+'</strong><p>'+esc(f.content)+'</p><p>处理说明：'+esc(f.resolution||'尚未处理')+'</p>'+((ME.views||[]).includes('ops')?'<button class="btn" data-feedback="'+f.id+'">填写处理结果</button>':'')+'</article>').join(''):'<p>暂无反馈。真实反馈提交后会显示在这里。</p>';
+    if(ME.role==='newbie'){
+      $('#requests-section').hidden=false; const rs=await api('/newbie/requests');
+      $('#requests').innerHTML=rs.length?rs.map(r=>'<article><strong>'+esc(statusName[r.status])+' · '+esc(r.kind==='confirm'?'确认操作':'问答')+'</strong><p>'+esc(r.at)+'\n请求编号：'+esc(r.request_id)+'</p>'+(r.result?'<details><summary>查看已保存结果</summary><p>'+esc(r.result.answer||'请回新人工作台恢复确认卡片')+'</p></details>':'')+'</article>').join(''):'<p>尚无操作记录。</p>';
+    }
+    if((ME.views||[]).includes('ops')){
+      $('#ops-section').hidden=false; const m=await api('/ops/readiness');
+      $('#metrics').textContent='版本：'+m.release+'\n数据库与迁移：'+(m.ready?'就绪':'异常')+'\n近7天参与账号：'+m.participants+'；请求：'+m.requests+'；完成：'+m.completed+'；结果不确定：'+m.uncertain+'；处理中：'+m.running+'\n反馈：'+m.feedback_total+'；待处理：'+m.feedback_open+'\n'+m.notice;
+      $('#metrics').style.whiteSpace='pre-wrap';
+      const as=await api('/ops/audit'); $('#audit').innerHTML=as.map(a=>'<p>'+esc(a.at)+' · '+esc(a.actor)+' · '+esc(a.action)+' · '+esc(a.target)+'</p>').join('')||'<p>尚无操作记录。</p>';
+    }
+    $('#notice').textContent='已刷新';
+  }catch(e){$('#notice').textContent=e.message;}
+}
+$('#refresh').onclick=load;
+$('#feedback-form').onsubmit=async function(e){e.preventDefault(); const b=this.querySelector('button');if(b.disabled)return;b.disabled=true;
+try{await api('/pilot/feedback',j('POST',{category:$('#category').value,rating:+$('#rating').value,content:$('#content').value}));$('#content').value='';$('#feedback-status').textContent='反馈已保存';await load();}catch(x){$('#feedback-status').textContent=x.message;}finally{b.disabled=false;}};
+document.addEventListener('click',async function(e){const b=e.target.closest('[data-ticket],[data-feedback]');if(!b||b.disabled)return;
+const note=prompt(b.dataset.ticket?'请填写本次处理说明；这只变更内置工单记录。':'请填写处理结果，提交后反馈标记为已处理。');if(!note||!note.trim())return;b.disabled=true;
+try{if(b.dataset.ticket)await api('/tickets/decision',j('POST',{ticket_id:b.dataset.ticket,action:b.dataset.action,note:note}));else await api('/pilot/feedback/resolve',j('POST',{id:+b.dataset.feedback,status:'resolved',resolution:note}));await load();}catch(x){$('#notice').textContent=x.message;}finally{b.disabled=false;}});
+(async function(){ME=await mount('/workspace');if(ME)load();})();
+</script></body></html>

@@ -39,6 +39,7 @@ def _load_context(session, employee_id: str) -> dict[str, Any]:
         "_mentor_id": emp.mentor_id,
         "_mentor_name": emp.mentor_name,
         "_day_index": emp.day_index(),
+        "_knowledge_scope": emp.team,
     }
 
 
@@ -102,6 +103,7 @@ def ask(
     employee_id: str = "e_linxy",
     session_id: str | None = None,
     persist: bool = True,
+    as_of: date | None = None,
 ) -> dict[str, Any]:
     """一次完整提问。返回 summarize(state) 的字典。
 
@@ -139,6 +141,13 @@ def ask(
 
     state = new_state(sid, employee_id, question)
     state.update(ctx)
+    state["_knowledge_as_of"] = (as_of or date.today()).isoformat()
+    state["_session_block"] += (
+        f"\n制度查询日期：{state['_knowledge_as_of']}。本轮制度结论只依据本轮检索到的有效版本。"
+        "历史助手消息不是制度依据，不可复用其中的金额、期限等规定。"
+        "用户问历史事项但未指定制度适用日期时，先请用户选择日期，不要猜测。"
+        "没有有效条款时明确说明查不到，不得用聊天历史或其他部门条款补充。"
+    )
     # **无条件赋值**，即使是空列表。
     # turn_scoped reducer 把"收到空列表"当作新一轮开始的信号去清掉旧值；
     # 写成 `if history:` 的话，第一轮（历史为空）就不会触发重置，
@@ -288,7 +297,9 @@ def health() -> dict[str, Any]:
     from . import embeddings, knowledge, llm
 
     ok_db, msg_db = db.ping()
-    ok_llm, msg_llm = llm.health()
+    import os
+    ok_llm = bool(os.getenv("DEEPSEEK_API_KEY"))
+    msg_llm = "已配置（未发起付费连通性测试）" if ok_llm else "未配置"
     return {
         "db": (ok_db, msg_db),
         "llm": (ok_llm, msg_llm),

@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -37,7 +38,6 @@ class Tool:
     fn: Callable[..., Any]
     domains: tuple[str, ...] = ("hr", "it", "biz")
     writes: bool = False
-    timeout_s: float = 10.0
 
     def schema(self) -> dict[str, Any]:
         """OpenAI function-calling 格式。writes 会写进 description，
@@ -129,16 +129,15 @@ class Registry:
                 user_message="这件事不在我当前的职责范围内，我帮你转到对应的同事。",
             )
 
-        # 写入类工具不真的执行，只生成待确认动作
-        if tool.writes:
-            preview = tool.fn(**args, _preview=True, _context=context or {})
-            return ToolResult(
-                name, True, data=preview, needs_confirmation=True,
-                pending_action={"tool": name, "args": args, "preview": preview},
-            )
-
         t0 = time.perf_counter()
         try:
+            if not isinstance(args, dict) or any(k.startswith('_') for k in args):
+                raise ToolError("非法内部参数", user_message="工具参数不合法，请重新描述你的需求。")
+            if tool.writes:
+                preview = tool.fn(**args, _preview=True, _context=context or {})
+                return ToolResult(name, True, data=preview, needs_confirmation=True,
+                    pending_action={"action_id": uuid.uuid4().hex, "tool": name, "args": args,
+                                    "preview": preview, "owner": (context or {}).get("employee_id")})
             data = tool.fn(**args, _context=context or {})
             return ToolResult(name, True, data=data,
                               duration_ms=int((time.perf_counter() - t0) * 1000))
@@ -156,8 +155,12 @@ class Registry:
         """用户确认后，真正执行写入。"""
         name = pending["tool"]
         tool = self.get(name)
-        if tool is None:
-            return ToolResult(name, False, error="工具已不存在")
+        context = dict(context or {})
+        if (tool is None or not tool.writes or context.get("domain") not in tool.domains
+                or pending.get("owner") != context.get("employee_id") or not pending.get("action_id")):
+            return ToolResult(name, False, error="待确认操作无效或无权限", user_message="操作权限或格式已变化，请重新发起申请。")
+        context["action_id"] = pending["action_id"]
+        context["expected_fields"] = (pending.get("preview") or {}).get("fields")
         t0 = time.perf_counter()
         try:
             data = tool.fn(**pending["args"], _preview=False, _context=context or {})
@@ -165,7 +168,7 @@ class Registry:
                               duration_ms=int((time.perf_counter() - t0) * 1000))
         except Exception as exc:  # noqa: BLE001
             return ToolResult(name, False, error=f"{type(exc).__name__}: {exc}",
-                              user_message="提交没成功，你可以稍后再试或直接联系 IT 服务台。")
+                              user_message="提交结果未确认，请先查看我的工单；不要重复创建申请。")
 
 
 registry = Registry()

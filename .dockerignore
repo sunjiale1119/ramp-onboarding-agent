@@ -1,0 +1,11 @@
+.env
+.env.*
+*.pem
+*.key
+.git
+.venv
+**/__pycache__
+backups
+runtime
+*.sql.gz
+*.tar.gz

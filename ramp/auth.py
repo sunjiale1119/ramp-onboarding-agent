@@ -14,15 +14,13 @@
    用标准库，不引依赖——但迭代次数不能省，那是唯一挡住离线爆破的东西。
 2. **鉴权在 API 层，不在界面层**。前端隐藏按钮只是体验，
    服务端拒绝返回才是边界。这两件事经常被混为一谈。
-3. **会话存库、可撤销、有过期**。签名 token（如 JWT）撤销不了——
-   登出之后那个串还是有效的，只是客户端把它丢了。
-   对一个"记忆可删、提问原文不外露"的产品来说，登出必须真的失效。
+3. **会话存库、可撤销、有过期**。本项目选择服务端会话实现立即撤销。
+   JWT 也可以通过撤销表等机制实现撤销，并非本质上做不到。
 
 ## 演示账号
 
-`bootstrap` 会种四个账号，密码都是 `ramp2026`，并在登录页明示。
-**这是演示环境的刻意选择，不是疏忽**——真实部署要走企业 SSO，
-见 `docs/` 里的已知边界。
+`bootstrap` 只创建管理员。普通账号由用户注册、管理员激活。
+默认管理员密码仅用于演示；真实部署须完成密码治理与企业身份集成。
 """
 
 from __future__ import annotations
@@ -261,10 +259,10 @@ def register(username: str, password: str, display_name: str) -> tuple[bool, str
     u = (username or "").strip().lower()
     if not (3 <= len(u) <= 32) or not u.replace("_", "").isalnum():
         return False, "用户名需 3–32 位，只能用字母、数字、下划线"
-    if len(password or "") < 8:
-        return False, "密码至少 8 位"
-    if not (display_name or "").strip():
-        return False, "请填写姓名"
+    if not 8 <= len(password or "") <= 256:
+        return False, "密码需 8–256 位"
+    if not 1 <= len((display_name or "").strip()) <= 64:
+        return False, "姓名需 1–64 字"
 
     s = get_session()
     try:
@@ -396,9 +394,19 @@ def update_user(username: str, *, role: str | None = None,
 
     s = get_session()
     try:
+        admins = s.query(User).filter_by(role="admin", active=True).with_for_update().all()
         u = s.get(User, username)
         if u is None:
             return False, "用户不存在"
+        if u.role == "admin" and u.active and len(admins) <= 1 and ((role is not None and role != "admin") or active is False):
+            return False, "不能停用或降级最后一个管理员"
+        for value in (display_name, team, title):
+            if value is not None and len(value) > 64:
+                return False, "姓名、团队和岗位最多64字"
+        if domain is not None and domain not in ("hr", "it", "biz"):
+            return False, "领域无效"
+        if role is not None and role != u.role:
+            s.query(Session_).filter_by(username=username).delete()
 
         if role is not None:
             if role not in ROLES:
@@ -435,7 +443,7 @@ def update_user(username: str, *, role: str | None = None,
                 target = s.get(User, m)
                 if target is None:
                     return False, f"没有 {m} 这个账号"
-                if target.role != "mentor":
+                if target.role != "mentor" or not target.active:
                     return False, f"{target.display_name} 的角色不是 Mentor"
             u.mentor = m or None
 

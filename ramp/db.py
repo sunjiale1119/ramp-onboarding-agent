@@ -89,13 +89,13 @@ class Knowledge(Base):
     def is_stale(self) -> bool:
         return bool(self.expires_on and self.expires_on < date.today())
 
-    def cite(self) -> str:
+    def cite(self, as_of: date | None = None) -> str:
         bits = [self.source_name]
         if self.confirmed_by:
             bits.append(f"由 {self.confirmed_by} 确认")
         if self.effective_from:
             bits.append(f"生效 {self.effective_from:%Y-%m-%d}")
-        if self.is_stale:
+        if self.expires_on and self.expires_on < (as_of or date.today()):
             bits.append("⚠ 已过期")
         return " · ".join(bits)
 
@@ -312,6 +312,8 @@ def create_database() -> None:
         conn.commit()
     boot.dispose()
     from . import auth  # noqa: F401 —— 导入即注册 users / auth_sessions 到 metadata
+    from . import knowledge_versions  # noqa: F401
+    from . import reliability, pilot  # noqa: F401
     Base.metadata.create_all(engine())
 
 

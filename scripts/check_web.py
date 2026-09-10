@@ -89,8 +89,10 @@ def templates(expr: str) -> list[str]:
 def check_paths() -> list[str]:
     from ramp.api import app
 
-    real = {re.sub(r"\{[^}]+\}", "*", r.path)
-            for r in app.routes if getattr(r, "path", "").startswith("/api")}
+    # Included routers can be lazy route containers in newer FastAPI versions.
+    # OpenAPI exposes the final mounted paths, including every router prefix.
+    real = {re.sub(r"\{[^}]+\}", "*", path)
+            for path in app.openapi()["paths"] if path.startswith("/api")}
 
     bad, n = [], 0
     for f in sorted(WEB.glob("*.html")) + sorted(WEB.glob("*.js")):

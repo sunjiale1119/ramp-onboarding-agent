@@ -92,7 +92,7 @@ async function answerCard(id, sink, text) {
     const r = await api('/mentor/answer', j('POST', {
       escalation_id: +id, answer: text, confirmed_by: ME.display_name, sink: sink === '1'
     }));
-    toast(sink === '1' ? '已沉淀为 L2 知识 #' + r.knowledge_id : '已回复，未沉淀');
+    toast(sink === '1' ? '已回复并提交知识草稿，管理员审核发布后可检索' : '已回复，未沉淀');
     loadMentor();
   } catch (e) { toast('失败：' + e.message); }
 }

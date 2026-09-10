@@ -11,6 +11,23 @@
 #back .mh, #back .mf { flex-shrink:0; }
 .ckbx { display:inline-flex !important; align-items:center; gap:6px; margin:4px 14px 4px 0; }
 .ckbx input[type="checkbox"] { width:auto; margin:0; display:inline-block; }
+.kb-versioned { align-items:start; }
+.kb-versioned > div { min-width:0; }
+.kb-versioned h3 { margin:0 0 12px; }
+.kb-versioned label { display:block; color:var(--ink2); }
+.kb-versioned input, .kb-versioned select, .kb-versioned textarea { max-width:100%; }
+.kb-versioned textarea { min-height:70px; }
+.kv-section input:not([type="checkbox"]), .kv-section textarea { width:100%; box-sizing:border-box; }
+.kb-versioned p, .kv-diff { overflow-wrap:anywhere; white-space:pre-wrap; }
+.kv-section { margin-top:24px; padding-top:18px; border-top:1px solid var(--rule); }
+.kv-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.kv-diff { padding:12px 0; border-bottom:1px solid var(--rule); }
+.kv-before { color:var(--ink2); }
+.kv-after { color:var(--ink); background:var(--goods); padding:8px; margin-top:4px; }
+.kb-versioned .hint { color:var(--ink2); }
+.kb-versioned button:disabled { opacity:.55; cursor:not-allowed; }
+@media(max-width:700px) { .kb-versioned.adm { grid-template-columns:minmax(0,1fr); } }
+@media(max-width:480px) { .kb-versioned .kbrow { grid-template-columns:minmax(0,1fr); } }
 </style>
 </head>
 <body>
@@ -44,47 +61,53 @@
   </div></div></div>
 
   <!-- ---------------- 知识库 ---------------- -->
-  <div class="pane" data-pane="k"><div class="shell"><div class="pad adm">
+  <div class="pane" data-pane="k"><div class="shell"><div class="pad adm kb-versioned">
     <div>
-      <input class="search" id="k-q" placeholder="搜索知识条目（问题 / 答案 / 来源）">
-      <div id="k-list"></div>
+      <h3>知识条款与版本</h3>
+      <p class="hint">编辑生成草稿，审核发布后才用于回答。历史版本永久保留。</p>
+      <label for="k-q">搜索问题、来源或规则主题</label>
+      <input class="search" id="k-q" placeholder="例如：住宿报销上限">
+      <label for="k-filter">显示范围</label>
+      <select id="k-filter"><option value="latest">每条款最新版本</option><option value="draft">待审核草稿</option><option value="all">全部版本与历史</option></select>
+      <div id="k-list" aria-live="polite"></div>
+      <details class="kv-section">
+        <summary>按日期预览检索结果</summary>
+        <p class="hint">用于检查新旧版本是否正确切换；不会生成回答。</p>
+        <label for="k-preview-q">查询问题</label><input id="k-preview-q">
+        <label for="k-preview-date">制度适用日期</label><input id="k-preview-date" type="date">
+        <label for="k-preview-scope">适用团队（留空为全公司）</label><input id="k-preview-scope">
+        <button class="btn" id="k-preview">预览有效版本</button>
+        <div id="k-preview-result" aria-live="polite"></div>
+      </details>
     </div>
     <div>
-      <div class="pnl"><div class="pl"><span id="k-mode">新增条目</span><span id="k-id"></span></div>
-        <div class="kbform">
-          <div><label>域</label><select id="k-domain">
-            <option value="hr">hr · 人事制度</option>
-            <option value="it">it · IT 与权限</option>
-            <option value="biz">biz · 业务与研发</option>
-          </select></div>
-          <div><label>问题</label><input id="k-question" placeholder="新人会怎么问这件事"></div>
-          <div><label>答案</label><textarea id="k-answer" placeholder="回答。写具体一点——检索命中后原文会直接进上下文"></textarea></div>
+      <div class="pnl"><div class="pl"><span id="k-mode">新建条款草稿</span><span id="k-id"></span></div>
+        <div class="kbform" id="kv-form">
+          <div><label for="k-import">导入条款文本（TXT / Markdown）</label><input id="k-import" type="file" accept=".txt,.md,text/plain,text/markdown"></div>
+          <p class="hint">一次维护一条规则。导入后请填写主题、来源和生效日期，再保存草稿。</p>
           <div class="kbrow">
-            <div><label>来源等级</label><select id="k-level">
-              <option value="L1">L1 · 制度原文</option>
-              <option value="L2" selected>L2 · 人工确认</option>
-              <option value="L3">L3 · 口口相传</option>
-            </select></div>
-            <div><label>来源名称</label><input id="k-source" placeholder="如：员工手册 v3.2"></div>
+            <div><label for="k-domain">领域</label><select id="k-domain"><option value="hr">人事制度</option><option value="it">IT 与权限</option><option value="biz">业务与研发</option></select></div>
+            <div><label for="k-scope">适用团队</label><input id="k-scope" placeholder="留空代表全公司"></div>
+          </div>
+          <div><label for="k-topic">规则主题（同一规则保持一致）</label><input id="k-topic" maxlength="255" placeholder="例如：差旅住宿报销上限"></div>
+          <div><label for="k-question">问题</label><input id="k-question" maxlength="512" placeholder="新人会怎么问这件事"></div>
+          <div><label for="k-answer">条款内容 / 答案</label><textarea id="k-answer" maxlength="20000" rows="8"></textarea></div>
+          <div class="kbrow">
+            <div><label for="k-level">来源等级</label><select id="k-level"><option value="L1">L1 · 制度原文</option><option value="L2">L2 · 人工确认</option><option value="L3">L3 · 待核实线索</option></select></div>
+            <div><label for="k-source">来源名称及条款位置</label><input id="k-source" maxlength="255" placeholder="差旅管理办法 · 第 3 条"></div>
           </div>
           <div class="kbrow">
-            <div><label>确认人</label><input id="k-by" placeholder="选填"></div>
-            <div><label>失效日期</label><input id="k-exp" type="date"></div>
+            <div><label for="k-effective">生效日期</label><input id="k-effective" type="date"></div>
+            <div><label for="k-exp">失效日期（含当天，选填）</label><input id="k-exp" type="date"></div>
           </div>
-          <div style="display:flex;gap:8px;margin-top:4px">
-            <button class="btn pri" id="k-save">保存</button>
-            <button class="btn" id="k-new">清空 / 新建</button>
-          </div>
+          <div><label for="k-note">变更说明</label><textarea id="k-note" maxlength="2000" rows="2" placeholder="说明修改了什么、为什么修改"></textarea></div>
+          <div class="kv-actions"><button class="btn pri" id="k-save">保存草稿</button><button class="btn" id="k-new">新建条款</button></div>
+          <p id="k-feedback" role="status"></p>
         </div>
-        <div class="note" style="margin-top:12px"><span class="nt">保存会做两件事</span>
-          写库 + <b>立刻重算这条的向量并重建索引</b>。<br>
-          少了第二步，改完在前台搜不到，会以为没生效——
-          而库里其实已经改了，只是检索还在用旧索引。<b>这种"改了但看不见"最难查。</b></div>
-        <div class="note" style="margin-top:10px"><span class="nt">L3 是干什么用的</span>
-          L3 的分数上限是 <b>0.45</b>，作答阈值 0.62——<b>结构上过不了</b>。
-          录进去不是为了让它直接回答，是为了让它<b>能被检索到、然后触发升级给 Mentor</b>。
-          过期条目同理。</div>
       </div>
+      <section id="k-review" class="kv-section" hidden aria-live="polite"></section>
+      <section id="k-history" class="kv-section" hidden></section>
+      <p class="hint">发布人取当前登录账号。相似条款检测只提供线索，最终须由发布人核对制度；同主题、同范围、同时间冲突不能强行发布。L3 发布后仍只能作为待核实线索。</p>
     </div>
   </div></div></div>
 
@@ -117,7 +140,7 @@
     <div class="tw"><table id="x-roles"></table></div>
 
     <h3 style="font-size:15px;margin:22px 0 8px">资源 → 审批账号</h3>
-    <p class="hint" style="margin-bottom:8px">提工单时的审批人。留空则显示「由 IT 服务台按资源自动分派」。</p>
+    <p class="hint" style="margin-bottom:8px">提工单时的审批人，必须选择真实账号。留空的申请不会自动分派，需要管理员配置后重新申请。</p>
     <div class="tw"><table id="x-appr"></table></div>
 
     <h3 style="font-size:15px;margin:22px 0 8px">已注册的工具</h3>
@@ -462,17 +485,20 @@ function personOpts(sel) {
 }
 
 async function saveExt(key, value) {
-  await api('/admin/external/config', j('POST', { key: key, value: value }));
+  try { await api('/admin/external/config', j('POST', { key: key, value: value })); }
+  catch(e) { alert(e.message); }
   await loadExternal();
 }
 
 function renderExt() {
   var d = EXT, c = d.config || {};
+  $('#x-load').hidden = !d.demo_load_allowed;
+  $('#x-clear').hidden = !d.demo_loaded;
 
   $('#x-demo').textContent = d.demo_loaded
     ? ('演示数据已装载于 ' + (d.demo_manifest.loaded_on || '') +
        '，共 ' + (d.demo_manifest.accounts || []).length + ' 个账号（密码 ramp2026）')
-    : '未装载。装载会创建真实账号，它们会出现在成员列表里、能登录。';
+    : (d.demo_load_allowed ? '未装载。装载会创建共享密码演示账号，仅限隔离测试。' : '试用环境禁止一键生成演示账号，请逐个注册并由管理员激活。');
 
   $('#x-sys').innerHTML =
     '<thead><tr><th>系统</th><th>不用配就能用</th><th>要配才能用</th><th>状态</th></tr></thead><tbody>' +
@@ -593,88 +619,174 @@ document.addEventListener('click', async function (e) {
 });
 
 /* ---------------- 知识库 ---------------- */
-function renderKB(items) {
-  $('#k-list').innerHTML = items.length ? items.map(function (k) {
-    return '<div class="kbitem"><b>' + esc(k.question) + '</b><br>' +
-      '<span style="color:var(--ink2)">' + esc(String(k.answer).slice(0, 130)) +
-      (String(k.answer).length > 130 ? '…' : '') + '</span>' +
-      '<div class="meta"><span>' + esc(k.source_level) + '</span>' +
-      '<span>' + esc(k.domain) + '</span><span>' + esc(k.source_name || '') + '</span>' +
-      (k.stale ? '<span style="color:var(--crit)">已过期</span>' : '') +
-      '<span style="margin-left:auto"></span>' +
-      '<button data-edit="' + k.id + '">编辑</button>' +
-      '<button data-del="' + k.id + '">删除</button></div></div>';
-  }).join('') : '<p class="hint">没有匹配的条目。</p>';
+var KV = null, KVReview = null, kvDirty = false, kvBusy = false, kvReadToken = 0;
+var KV_STATE = { draft: '草稿待审核', active: '当前有效', scheduled: '待生效', superseded: '已被替代', expired: '已失效', discarded: '草稿已撤回', withdrawn: '待生效版本已撤回' };
+function kvToday() {
+  var now = new Date();
+  return now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-' + String(now.getDate()).padStart(2,'0');
 }
-
+function kvFeedback(message, error) {
+  $('#k-feedback').textContent = message;
+  $('#k-feedback').className = error ? 'err' : 'hint';
+}
+function renderKB() {
+  var q = $('#k-q').value.trim().toLowerCase(), filter = $('#k-filter').value;
+  var latest = {};
+  KB.forEach(function(k) {
+    var previous = latest[k.policy_id], live = ['draft','published'].includes(k.status);
+    var previousLive = previous && ['draft','published'].includes(previous.status);
+    if (!previous || (live && !previousLive) || (live === previousLive && previous.number < k.number)) latest[k.policy_id] = k;
+  });
+  var items = KB.filter(function(k) {
+    return (filter === 'all' || (filter === 'draft' ? k.status === 'draft' : latest[k.policy_id].id === k.id)) &&
+      (k.question + ' ' + k.answer + ' ' + k.topic + ' ' + k.source_name).toLowerCase().includes(q);
+  });
+  $('#k-list').innerHTML = items.length ? items.map(function(k) {
+    return '<article class="kbitem"><div class="kv-actions"><strong>' + esc(k.question) + '</strong><span class="pill">' +
+      esc(KV_STATE[k.state] || k.state) + ' · v' + k.number + '</span></div><p>' + esc(k.answer.slice(0,130)) +
+      (k.answer.length > 130 ? '…' : '') + '</p><p class="hint">' + esc(k.source_name) + ' · ' +
+      esc(k.scope === '*' ? '全公司' : k.scope) + ' · 生效 ' + esc(k.effective_from || '历史未指定') +
+      '</p><div class="kv-actions">' +
+      (['draft','published'].includes(k.status) ? '<button class="btn" data-kvedit="' + k.id + '">' +
+      (k.status === 'draft' ? '编辑草稿' : '基于此版修改') + '</button>' : '') +
+      (k.status === 'draft' ? '<button class="btn" data-kvreview="' + k.id + '">审核差异</button><button class="btn" data-kvdiscard="' + k.id + '">撤回草稿</button>' : '') +
+      (k.state === 'scheduled' ? '<button class="btn" data-kvdiscard="' + k.id + '">撤回待生效版本</button>' : '') +
+      '<button class="btn" data-kvhistory="' + k.id + '">版本历史</button></div></article>';
+  }).join('') : '<p class="hint">暂无匹配版本。可新建条款，或切换显示范围。</p>';
+}
 async function loadKB() {
-  try {
-    var d = await api('/admin/knowledge');
-    KB = d.items || d;
-    renderKB(KB);
-  } catch (e) { $('#k-list').innerHTML = '<p class="err">' + esc(e.message) + '</p>'; }
+  try { var d = await api('/admin/knowledge'); KB = d.items; renderKB(); }
+  catch(e) { $('#k-list').textContent = '加载失败：' + e.message; }
 }
-
-$('#k-q').oninput = function () {
-  var q = $('#k-q').value.trim().toLowerCase();
-  renderKB(!q ? KB : KB.filter(function (k) {
-    return (k.question + ' ' + k.answer + ' ' + (k.source_name || '')).toLowerCase().indexOf(q) >= 0;
-  }));
-};
-
+$('#k-q').oninput = renderKB;
+$('#k-filter').onchange = renderKB;
 function fillForm(k) {
-  editing = k ? k.id : null;
-  $('#k-mode').textContent = k ? '编辑条目' : '新增条目';
-  $('#k-id').textContent = k ? '#' + k.id : '';
-  $('#k-domain').value = k ? k.domain : 'hr';
-  $('#k-question').value = k ? k.question : '';
-  $('#k-answer').value = k ? k.answer : '';
-  $('#k-level').value = k ? k.source_level : 'L2';
-  $('#k-source').value = k ? (k.source_name || '') : '';
-  $('#k-by').value = k ? (k.confirmed_by || '') : '';
-  $('#k-exp').value = k && k.expires_on ? k.expires_on : '';
+  KV = k || null; editing = k ? k.id : null; KVReview = null; kvDirty = false; kvReadToken++;
+  $('#k-review').hidden = true;
+  $('#k-mode').textContent = !k ? '新建条款草稿' : k.status === 'draft' ? '编辑草稿' : '从 v' + k.number + ' 创建新草稿';
+  $('#k-id').textContent = k ? k.policy_id.slice(0,8) : '';
+  var fields = { domain:'domain', question:'question', answer:'answer', level:'source_level', source:'source_name',
+    scope:'scope', topic:'topic', exp:'expires_on', note:'change_note' };
+  Object.keys(fields).forEach(function(key) {
+    $('#k-'+key).value = k ? (k[fields[key]] || '') : (key === 'domain' ? 'hr' : key === 'level' ? 'L1' : '');
+  });
+  if ($('#k-scope').value === '*') $('#k-scope').value = '';
+  ['domain','scope','topic'].forEach(function(key) { $('#k-'+key).disabled = !!k; });
+  $('#k-effective').value = k && k.status === 'draft' ? (k.effective_from || kvToday()) : kvToday();
+  if (k && k.status === 'published') $('#k-note').value = '基于 v' + k.number + ' 更新：';
+  kvFeedback(k && k.status === 'published' ? '原版本会保留；保存只创建草稿。恢复旧内容也需要重新审核发布。' : '', false);
 }
-
-$('#k-list').onclick = async function (e) {
-  var ed = e.target.closest('[data-edit]');
-  if (ed) {
-    fillForm(KB.find(function (x) { return String(x.id) === ed.dataset.edit; }));
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    return;
-  }
-  var dl = e.target.closest('[data-del]');
-  if (!dl) return;
-  if (!confirm('删除这条知识？删掉之后检索命中不到，相关提问会走升级路径。')) return;
-  try {
-    await api('/admin/knowledge/delete', j('POST', { id: +dl.dataset.del }));
-    toast('已删除，索引已重建');
-    await loadKB();
-    if (String(editing) === dl.dataset.del) fillForm(null);
-  } catch (x) { toast(x.message); }
+$('#kv-form').addEventListener('input', function(e) {
+  if (e.target.id !== 'k-import') { kvDirty = true; KVReview = null; $('#k-review').hidden = true; kvReadToken++; }
+});
+$('#k-new').onclick = function() { if (!kvBusy && (!kvDirty || confirm('放弃尚未保存的修改？'))) fillForm(null); };
+$('#k-import').onchange = async function() {
+  var file = this.files[0]; if (!file) return;
+  if (file.size > 100000 || !/\.(txt|md)$/i.test(file.name)) { kvFeedback('请选择小于 100 KB 的 TXT 或 Markdown 条款文件。', true); return; }
+  var text = await file.text();
+  if (text.length > 20000) { kvFeedback('内容超过 20000 字，请按条款拆分。', true); return; }
+  $('#k-answer').value = text; $('#k-source').value = file.name;
+  kvDirty = true; KVReview = null; $('#k-review').hidden = true; kvReadToken++;
+  kvFeedback('文本已载入，请核对主题和日期后保存草稿。');
 };
-
-$('#k-new').onclick = function () { fillForm(null); };
-$('#k-save').onclick = async function () {
-  var body = {
-    domain: $('#k-domain').value,
-    question: $('#k-question').value.trim(),
-    answer: $('#k-answer').value.trim(),
-    source_level: $('#k-level').value,
-    source_name: $('#k-source').value.trim() || '管理后台录入',
-    confirmed_by: $('#k-by').value.trim(),
-    expires_on: $('#k-exp').value || null
-  };
-  if (!body.question || !body.answer) { toast('问题和答案都要填'); return; }
-  if (editing) body.id = editing;
-  $('#k-save').disabled = true;
+$('#k-save').onclick = async function() {
+  if (kvBusy) return;
+  var body = { domain:$('#k-domain').value, scope:$('#k-scope').value.trim() || '*',
+    topic:$('#k-topic').value.trim(), question:$('#k-question').value.trim(), answer:$('#k-answer').value.trim(),
+    source_level:$('#k-level').value, source_name:$('#k-source').value.trim(), effective_from:$('#k-effective').value,
+    expires_on:$('#k-exp').value || null, change_note:$('#k-note').value.trim() };
+  if (KV) { body.id = KV.id; body.revision = KV.revision; }
+  kvBusy = true; this.disabled = true;
   try {
     var r = await api('/admin/knowledge/save', j('POST', body));
-    toast(r.message + '（向量已重算，索引已重建）');
-    await loadKB();
-    fillForm(null);
-  } catch (x) { toast(x.message); }
-  $('#k-save').disabled = false;
+    await loadKB(); fillForm(r.item); kvFeedback(r.message);
+    await kvReview(r.item.id);
+  } catch(e) { kvFeedback(e.message, true); }
+  finally { kvBusy = false; this.disabled = false; }
 };
+async function kvReview(id) {
+  var token = ++kvReadToken;
+  var r = await api('/admin/knowledge/review/' + id);
+  if (token !== kvReadToken) return;
+  fillForm(r.version); KVReview = r;
+  var names = {answer:'条款内容',question:'问题',source_name:'来源',source_level:'来源等级',effective_from:'生效日期',expires_on:'失效日期',topic:'规则主题',scope:'适用范围',domain:'领域'};
+  var panel = $('#k-review');
+  panel.hidden = false;
+  panel.innerHTML = '<h3>审核 v' + r.version.number + ' 的变更</h3>' +
+    '<p class="hint">与当前最新发布版本对比。发布日期不等于生效日期。</p>' +
+    r.differences.map(function(x) { return '<div class="kv-diff"><strong>' + esc(names[x.field] || x.field) +
+      '</strong><div class="kv-before">原：' + esc(x.before || '未设置') + '</div><div class="kv-after">新：' + esc(x.after || '未设置') + '</div></div>'; }).join('') +
+    (r.blockers.length ? '<div class="err"><strong>暂不能发布</strong><ul>' + r.blockers.map(function(x) {return '<li>'+esc(x)+'</li>';}).join('')+'</ul></div>' : '') +
+    '<h4>需核对的相似条款（' + r.candidates.length + '）</h4>' +
+    r.candidates.map(function(x) {return '<div class="kv-diff"><strong>' + esc(x.question) + ' · v' + x.number +
+      '</strong><p>' + esc(x.answer) + '</p><p class="hint">' + esc(x.source_name) + ' · '+esc(x.scope==='*'?'全公司':x.scope)+'</p>' +
+      (x.same_topic ? '<p class="err">同一规则发生时间和范围重叠，不能勾选跳过。</p>' :
+      '<label class="ckbx"><input type="checkbox" data-kvack="'+x.id+'">已核对，该条款不与草稿冲突</label>') + '</div>';}).join('') +
+    '<p class="hint">'+esc(r.notice)+'</p><label for="kv-review-note">审核意见 / 相似条款不冲突的理由</label>' +
+    '<textarea id="kv-review-note" maxlength="2000" rows="3"></textarea>' +
+    '<label class="ckbx"><input type="checkbox" id="kv-reviewed">我已核对原制度、适用范围及生效日期</label>' +
+    '<button class="btn pri" id="kv-publish" '+(r.blockers.length?'disabled':'')+'>审核通过并发布</button><p id="kv-publish-status" role="status"></p>';
+}
+async function kvHistory(id) {
+  var r = await api('/admin/knowledge/history/' + id), panel = $('#k-history');
+  var actions = {migrated:'原知识迁移',draft_created:'创建草稿',draft_updated:'修改草稿',restored_as_draft:'从历史恢复草稿',published:'审核发布',scheduled_withdrawn:'撤回待生效版本',draft_discarded:'撤回草稿'};
+  panel.hidden = false;
+  panel.innerHTML = '<h3>版本历史</h3><p class="hint">恢复操作会复制历史内容为新草稿，不覆盖历史记录。</p>' +
+    r.items.map(function(x) {return '<div class="kv-diff"><strong>v'+x.number+' · '+esc(KV_STATE[x.state])+'</strong><p>'+
+      esc(x.change_note)+'</p><p class="hint">创建：'+esc(x.created_by)+' · 发布：'+esc(x.reviewed_by || '历史迁移 / 尚未发布')+'</p>'+
+      (x.status==='published'?'<button class="btn" data-kvrestore="'+x.id+'">恢复此版内容为草稿</button>':'')+'</div>';}).join('') +
+    '<details><summary>操作记录（'+r.audit.length+'）</summary>'+
+    r.audit.map(function(a) {return '<p>'+esc(a.at)+' · '+esc(a.actor)+' · '+esc(actions[a.action] || a.action)+'</p><details><summary>查看操作详情</summary><p>'+esc(a.detail)+'</p></details>';}).join('')+'</details>';
+}
+document.addEventListener('click', async function(e) {
+  var b = e.target.closest('[data-kvedit],[data-kvreview],[data-kvhistory],[data-kvdiscard],[data-kvrestore],#kv-publish');
+  if (!b || kvBusy) return;
+  try {
+    if (b.dataset.kvedit || b.dataset.kvrestore) {
+      if (kvDirty && !confirm('放弃尚未保存的修改？')) return;
+      var id = +(b.dataset.kvedit || b.dataset.kvrestore);
+      var k = KB.find(function(x) {return x.id === id;});
+      if (k) fillForm(k);
+      if (b.dataset.kvrestore) { $('#k-note').value = '恢复 v'+k.number+' 的内容：'; kvFeedback('已载入历史内容。请设置新的生效日期和恢复原因，然后保存草稿。'); }
+      $('#k-question').focus(); return;
+    }
+    if (b.dataset.kvreview) {
+      if (kvDirty && !confirm('放弃尚未保存的修改，审核已保存草稿？')) return;
+      await kvReview(+b.dataset.kvreview); return;
+    }
+    if (b.dataset.kvhistory) { await kvHistory(+b.dataset.kvhistory); return; }
+    kvBusy = true; b.disabled = true;
+    if (b.dataset.kvdiscard) {
+      var item = KB.find(function(x) {return x.id === +b.dataset.kvdiscard;});
+      if (!confirm('撤回这个尚未生效的版本？当前有效知识不受影响，操作记录会保留。')) return;
+      await api('/admin/knowledge/delete', j('POST', {id:item.id, revision:item.revision}));
+      fillForm(null); await loadKB(); kvFeedback('版本已撤回，历史记录保留。'); return;
+    }
+    if (b.id === 'kv-publish' && KVReview) {
+      var body = {id:KVReview.version.id, revision:KVReview.version.revision, review_token:KVReview.review_token,
+        reviewed:$('#kv-reviewed').checked, review_note:$('#kv-review-note').value.trim(),
+        acknowledged:$$('[data-kvack]:checked').map(function(x) {return +x.dataset.kvack;})};
+      var result = await api('/admin/knowledge/publish', j('POST', body));
+      await loadKB(); fillForm(result.item); kvFeedback(result.message); await kvHistory(result.item.id);
+    }
+  } catch(err) {
+    kvFeedback(err.message, true);
+    if ($('#kv-publish-status')) $('#kv-publish-status').textContent = err.message;
+  } finally { kvBusy = false; b.disabled = false; }
+});
+$('#k-preview').onclick = async function() {
+  this.disabled = true;
+  try {
+    var params = new URLSearchParams({query:$('#k-preview-q').value});
+    if ($('#k-preview-date').value) params.set('as_of',$('#k-preview-date').value);
+    if ($('#k-preview-scope').value.trim()) params.set('scope',$('#k-preview-scope').value.trim());
+    var r = await api('/admin/knowledge/preview?' + params);
+    $('#k-preview-result').innerHTML = '<p>'+esc(r.as_of)+' · '+(r.confident?'检索通过作答门槛':'证据不足，不应作为确定答案')+'</p>'+
+      (r.hits.length ? r.hits.map(function(h) {return '<div class="kv-diff"><strong>'+esc(h.question)+'</strong><p>'+esc(h.answer)+'</p><p class="hint">'+esc(h.citation)+'</p></div>';}).join('') : '<p>没有适用于该日期和范围的已发布知识。</p>');
+  } catch(e) { $('#k-preview-result').textContent = e.message; }
+  finally { this.disabled = false; }
+};
+fillForm(null);
 
 /* ---------------- 系统 ---------------- */
 async function loadSystem() {

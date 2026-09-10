@@ -82,7 +82,7 @@ def answer_and_sink(
     sink: bool = True,
     valid_months: int = 12,
 ) -> dict[str, Any]:
-    """Mentor 回答 → 审核沉淀为 L2 → 重建索引。
+    """Mentor 回答 → 提交 L2 草稿 → 等待管理员审核发布。
 
     sink=False 时只回复不沉淀（有些答案是一次性的，不该进知识库）——
     这个开关本身是产品设计：不是所有回答都值得成为组织资产。
@@ -120,14 +120,14 @@ def answer_and_sink(
         effective_from=date.today(),
         expires_on=date.today() + timedelta(days=30 * valid_months),
     )
-    esc.status = "sunk"
+    esc.status = "review_pending"
     esc.knowledge_id = row.id
     session.commit()
 
-    knowledge.reload_index()  # 飞轮的最后一步：新知识立刻可被检索到
 
     result.update({
-        "sunk": True,
+        "sunk": False,
+        "review_pending": True,
         "knowledge_id": row.id,
         "citation": row.cite(),
         "kb_size": knowledge.index().size,

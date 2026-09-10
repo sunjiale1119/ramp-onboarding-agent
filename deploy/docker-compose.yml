@@ -49,7 +49,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
-    image: ramp:latest
+    image: ${RAMP_IMAGE:-ramp:latest}
     container_name: ramp
     restart: unless-stopped
     depends_on:
@@ -58,8 +58,8 @@ services:
     environment:
       MYSQL_HOST: mysql
       MYSQL_PORT: "3306"
-      MYSQL_USER: root
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_USER: ${RAMP_DB_USER:-root}
+      MYSQL_PASSWORD: ${RAMP_DB_PASSWORD:-${MYSQL_PASSWORD}}
       MYSQL_DB: ramp
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL}
@@ -72,9 +72,12 @@ services:
       RAMP_EMBEDDING_BACKEND: dashscope
       RAMP_EMBEDDING_MODEL: text-embedding-v4
       RAMP_EMBEDDING_DIM: "1024"
-      # 演示模式：界面挂「演示数据」横幅 + 每次启动把演示员工滚回 30 天窗口。
-      # 真实部署必须关掉 —— 一个会自己改员工入职日期的 HR 系统是灾难。
+      # 界面标记演示环境；不生成员工、不更改真实账号入职日期。
       RAMP_DEMO_MODE: "1"
+      RAMP_ALLOW_DEMO_LOAD: "0"
+      RAMP_DAILY_ASK_LIMIT: "50"
+      RAMP_MAX_CONCURRENT: "3"
+      RAMP_RELEASE: ${RAMP_RELEASE:-local}
       # 线上不接 LangSmith：多一个外部依赖就多一个启动失败的可能，
       # 而且演示环境的 trace 没人看。要开就填 key 再重启。
       LANGSMITH_API_KEY: ""
@@ -83,6 +86,23 @@ services:
       # 只绑 8000。80 归 kaogong，不动它。
       - "8000:8000"
     networks: [ramp-net]
+    init: true
+    stop_grace_period: 180s
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    volumes:
+      - /opt/ramp/runtime/reports:/app/ramp/eval/reports
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
 
 volumes:
   ramp-mysql-data:

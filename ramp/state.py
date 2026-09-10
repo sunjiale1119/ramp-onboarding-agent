@@ -79,6 +79,7 @@ def merge_spans(a: list[dict[str, Any]] | None,
 
 
 class RampState(TypedDict, total=False):
+    _action_id: str
     # ---- 输入 ----
     session_id: str
     employee_id: str
@@ -133,6 +134,8 @@ class RampState(TypedDict, total=False):
     _mentor_id: str | None
     _mentor_name: str | None
     _day_index: int
+    _knowledge_scope: str
+    _knowledge_as_of: str
 
     # ---- 观测 ----
     spans: Annotated[list[dict[str, Any]], merge_spans]
@@ -196,6 +199,7 @@ def summarize(state: RampState) -> dict[str, Any]:
         "tools": [t.get("name") for t in state.get("tool_calls", [])],
         "escalation_id": state.get("escalation_id"),
         "pending_action": state.get("pending_action"),
+        "action_result": state.get("action_result"),
         # 从**去重后的 spans** 派生，而不是信 state 里累加的 cost——
         # 后者会把父图节点算两遍。一个真相来源。
         "cost": round(sum(s.get("cost", 0.0) for s in state.get("spans", [])), 6),

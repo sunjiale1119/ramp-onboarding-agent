@@ -110,6 +110,8 @@ class KnowledgeIndex:
     这个规模用向量数据库是过度工程，理由写在 embeddings.py 顶部。"""
 
     def __init__(self) -> None:
+        self._as_of = date.today()
+        self._version_meta: dict = {}
         self._rows: list[db.Knowledge] = []
         self._tokens: list[list[str]] = []
         self._bm25: BM25Okapi | None = None
@@ -117,11 +119,14 @@ class KnowledgeIndex:
         self._loaded = False
 
     # -- 载入 ------------------------------------------------------
-    def load(self, session=None) -> "KnowledgeIndex":
+    def load(self, session=None, *, as_of=None, scope=None) -> "KnowledgeIndex":
+        from . import knowledge_versions as versions
+        self._as_of = as_of or date.today()
         own = session is None
         session = session or db.get_session()
         try:
-            rows = list(session.query(db.Knowledge).all())
+            self._version_meta = versions.active_metadata(session, as_of=as_of, scope=scope)
+            rows = list(session.query(db.Knowledge).filter(db.Knowledge.id.in_(self._version_meta)).all())
         finally:
             if own:
                 session.close()
@@ -200,7 +205,7 @@ class KnowledgeIndex:
         a = 0.0 if degraded else config.HYBRID_ALPHA
         raw = a * dense + (1 - a) * bm_norm
 
-        today = date.today()
+        today = self._as_of
         hits: list[Hit] = []
         for i, row in enumerate(self._rows):
             if domain and row.domain != domain:
@@ -221,7 +226,7 @@ class KnowledgeIndex:
                     source_name=row.source_name,
                     confirmed_by=row.confirmed_by,
                     is_stale=stale,
-                    citation=row.cite(),
+                    citation=self._version_meta.get(row.id, {}).get("citation", row.cite(as_of=today)),
                     raw_score=float(raw[i]),
                     score=final,
                     bm25=float(bm_norm[i]),
@@ -276,24 +281,39 @@ class KnowledgeIndex:
 
 
 _index: KnowledgeIndex | None = None
+_index_key = None
+from threading import RLock
+_index_lock = RLock()
 
 
-def index() -> KnowledgeIndex:
-    global _index
-    if _index is None:
-        _index = KnowledgeIndex().load()
-    return _index
+def index(*, as_of=None, scope=None) -> KnowledgeIndex:
+    from . import knowledge_versions as versions
+    global _index, _index_key
+    as_of = as_of or date.today()
+    # DB generation works across workers; the date also invalidates future versions
+    # at midnight without requiring another publish or a scheduled job.
+    key = (versions.catalog_generation(), as_of, scope)
+    with _index_lock:
+        if _index is None or _index_key != key:
+            built = KnowledgeIndex().load(as_of=as_of, scope=scope)
+            _index, _index_key = built, key
+        return _index
 
 
 def reload_index() -> KnowledgeIndex:
     """知识写入后调用——飞轮的最后一步是让新知识立刻可被检索到。"""
-    global _index
-    _index = KnowledgeIndex().load()
-    return _index
+    global _index, _index_key
+    with _index_lock:
+        _index, _index_key = None, None
+    return index()
 
 
 def search(query: str, **kw: Any) -> Retrieval:
-    return index().search(query, **kw)
+    as_of = kw.pop("as_of", None)
+    if isinstance(as_of, str):
+        as_of = date.fromisoformat(as_of)
+    scope = kw.pop("scope", None)
+    return index(as_of=as_of, scope=scope).search(query, **kw)
 
 
 # ------------------------------------------------------------------ 写入
@@ -309,21 +329,17 @@ def add_knowledge(
     effective_from: date | None = None,
     expires_on: date | None = None,
 ) -> db.Knowledge:
-    """新增一条知识并算好向量。飞轮的 04 步就是调它。"""
-    row = db.Knowledge(
-        domain=domain,
-        question=question.strip(),
-        answer=answer.strip(),
-        source_level=source_level,
-        source_name=source_name,
-        confirmed_by=confirmed_by,
-        effective_from=effective_from or date.today(),
-        expires_on=expires_on,
-        embedding=embeddings.encode_one(f"{question} {answer}"),
-    )
-    session.add(row)
-    session.commit()
-    return row
+    """人工回答进入知识草稿；管理员审核发布时才计算向量。"""
+    from . import knowledge_versions as versions
+    # Mentor answers also enter review; no alternate write path may bypass it.
+    draft = versions.save_draft(session, {
+        "domain": domain, "question": question, "answer": answer,
+        "source_level": source_level, "source_name": source_name,
+        "topic": question[:255], "scope": "*",
+        "effective_from": effective_from or date.today(), "expires_on": expires_on,
+        "change_note": "人工回答提交审核，尚未作为正式制度发布",
+    }, confirmed_by or "system")
+    return session.get(db.Knowledge, draft["knowledge_id"])
 
 
 def seed_from_file(session, path=None) -> int:

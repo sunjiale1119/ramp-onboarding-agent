@@ -29,7 +29,8 @@ def _make_retrieve(domain: str):
     def retrieve(state: RampState) -> dict[str, Any]:
         sid = state["session_id"]
         with trace.span("retrieve", sid, state.get("step", 0), domain=domain) as sp:
-            r = knowledge.search(state["question"], domain=domain, top_k=4)
+            r = knowledge.search(state["question"], domain=domain, top_k=4,
+                                 scope=state.get("_knowledge_scope"), as_of=state.get("_knowledge_as_of"))
             sp.detail.update(
                 best_score=round(r.best_score, 4),
                 confident=r.confident,
@@ -37,6 +38,8 @@ def _make_retrieve(domain: str):
                 threshold=config.CONFIDENCE_THRESHOLD,
                 top_level=r.best.source_level if r.best else None,
                 top_stale=r.best.is_stale if r.best else None,
+                knowledge_as_of=state.get("_knowledge_as_of"),
+                sources=[{"id": h.knowledge_id, "citation": h.citation} for h in r.hits],
             )
         return {
             "hits": [h.to_dict() for h in r.hits],
@@ -263,6 +266,8 @@ def _make_act(domain: str):
             "employee_id": state["employee_id"],
             "employee_name": state.get("_employee_name", ""),
             "domain": domain,
+            "knowledge_scope": state.get("_knowledge_scope"),
+            "knowledge_as_of": state.get("_knowledge_as_of"),
         }
         schemas = registry.schemas(domain)
         messages = prompts.build(
@@ -384,11 +389,12 @@ def _make_confirm(domain: str):
         decision = interrupt({
             "type": "confirm_write",
             "tool": pending.get("tool"),
+            "action_id": pending.get("action_id"),
             "fields": (pending.get("preview") or {}).get("fields", {}),
-            "hint": "提交后有 5 分钟撤回窗口",
+            "hint": "创建内置申请记录；待审批时可在我的工单中取消。",
         })
         confirmed = bool(decision.get("confirmed")) if isinstance(decision, dict) else bool(decision)
-        return {"confirmed": confirmed}
+        return {"confirmed": confirmed, "_action_id": pending.get("action_id", "")}
 
     return confirm
 
@@ -398,7 +404,7 @@ def _make_execute(domain: str):
         sid = state["session_id"]
         if not state.get("confirmed"):
             return {
-                "answer": "好，这次不提交。需要的时候再跟我说，我把草稿留着。",
+                "answer": "已取消，本次没有提交工单。需要时请重新发起申请。",
                 "route": "answer",
                 "pending_action": None,
             }
@@ -416,7 +422,7 @@ def _make_execute(domain: str):
 
         if not tr.ok:
             return {"answer": tr.user_message or "提交没成功。", "route": "answer",
-                    "pending_action": None, "spans": [sp.to_dict()]}
+                    "pending_action": None, "action_result": {"status": "uncertain"}, "spans": [sp.to_dict()]}
 
         d = tr.data
         # expected_by 只在服务台配了该资源的 SLA 时才存在。
@@ -430,10 +436,7 @@ def _make_execute(domain: str):
             text = f"{head}审批人 {who}，预计 {eta} 前有结果。"
         else:
             text = f"{head}审批人与预计时间由 IT 服务台分派后确定（当前：{who}）。"
-        text += (
-            "\n\n这件事我先挂起了——有结果我会主动通知你，你不用回来问。"
-            f"\n\n撤回窗口还剩 {d.get('revocable_until_minutes', 5)} 分钟。"
-        )
+        text += "\n\n可在「工单与试用」查看结果，待审批时可取消。此为内置工单记录，不代表真实 IT 权限已开通，也不会自动推送审批结果。"
         return {
             "answer": text, "route": "answer", "pending_action": None,
             "action_result": d, "spans": [sp.to_dict()],

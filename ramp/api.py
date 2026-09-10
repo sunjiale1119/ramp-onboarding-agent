@@ -17,14 +17,22 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
 from fastapi import FastAPI, HTTPException, Cookie, Depends, Response
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from . import auth, config, db, demo, escalate, external, knowledge, memory, proactive, runtime, trace
+from . import reliability, pilot, security, service_api
 
 app = FastAPI(title="爬坡 Ramp API", version="0.1.0")
+app.add_middleware(security.BoundaryMiddleware)
+
+
+@app.exception_handler(Exception)
+async def unexpected_error(request, exc):
+    import logging
+    logging.getLogger("ramp").error("unhandled request failure type=%s", type(exc).__name__)
+    return JSONResponse({"detail": "处理未完成，请查询操作记录；不要重复创建工单。"}, status_code=503)
 
 
 @app.on_event("startup")
@@ -38,6 +46,10 @@ def _startup() -> None:
     import logging
 
     log = logging.getLogger("ramp")
+    from .knowledge_versions import migrate
+    migrate()  # Additive and idempotent; fail startup rather than serve unversioned knowledge.
+    reliability.migrate()
+    pilot.migrate()
     try:
         n = len(auth.list_users())
         log.info("[启动] 账号 %d 个", n)
@@ -49,15 +61,18 @@ def _startup() -> None:
 
 # ------------------------------------------------------------------ 模型
 class AskIn(BaseModel):
+    request_id: str = Field(min_length=8, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
     question: str = Field(min_length=1, max_length=2000)
     # 没有默认值：原来写死 "e_linxy"（一个已被删除的演示员工），
     # 客户端漏传时会静默问到别人头上，而不是报错。
     employee_id: str = Field(min_length=1, max_length=64)
-    session_id: str | None = None
+    session_id: str | None = Field(default=None, max_length=64)
+    as_of: date | None = None
 
 
 class ConfirmIn(BaseModel):
-    session_id: str
+    session_id: str = Field(min_length=1, max_length=64)
+    action_id: str = Field(min_length=1, max_length=64)
     confirmed: bool
 
 
@@ -111,6 +126,11 @@ def own_employee(p: auth.Principal, employee_id: str) -> None:
     """
     if p.role == "newbie" and p.employee_id != employee_id:
         raise HTTPException(403, "只能查看自己的数据")
+    if p.role == "mentor":
+        with db.get_session() as s:
+            u = s.get(auth.User, employee_id)
+            if u is None or not u.active or u.mentor != p.username or u.role != "newbie":
+                raise HTTPException(403, "只能查看当前分配给自己带教的新人")
 
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -171,6 +191,11 @@ for _n, _v in (("newbie", "newbie"), ("mentor", "mentor"), ("hr", "hr"),
     app.get("/" + _n, include_in_schema=False)(_guarded_page(_n, _v))
 
 
+@app.get("/workspace", include_in_schema=False)
+def workspace(p=Depends(current)):
+    return _page("workspace")
+
+
 # 静态资源不缓存。改完样式刷新看不到效果，会让人以为改错了地方去动源码——
 # 那是开发时最费时间的一类假问题。生产环境该换成带 hash 的文件名。
 NO_CACHE = {"Cache-Control": "no-store, must-revalidate"}
@@ -191,11 +216,14 @@ def shared_js():
 
 @app.post("/api/login", include_in_schema=True)
 def do_login(body: dict, response: Response) -> dict[str, Any]:
+    if len(str(body.get("password", ""))) > 256 or len(str(body.get("username", ""))) > 64:
+        raise HTTPException(400, "账号或密码过长")
     token = auth.login(str(body.get("username", "")), str(body.get("password", "")))
     if token is None:
         # 统一文案：不告诉对方是"没这个用户"还是"密码错"
         raise HTTPException(401, "用户名或密码不正确")
-    response.set_cookie(COOKIE, token, httponly=True, samesite="lax", max_age=auth.SESSION_HOURS * 3600)
+    import os
+    response.set_cookie(COOKIE, token, httponly=True, samesite="lax", secure=os.getenv("RAMP_SECURE_COOKIE") == "1", max_age=auth.SESSION_HOURS * 3600)
     return {"ok": True, "me": auth.resolve(token).to_dict()}
 
 
@@ -222,8 +250,19 @@ def whoami(p: auth.Principal = Depends(current)) -> dict[str, Any]:
 
 
 @app.get("/api/health")
-def health() -> dict[str, Any]:
+def health(p=Depends(current)) -> dict[str, Any]:
     return runtime.health()
+
+
+@app.get("/health/live", include_in_schema=False)
+def live():
+    return {"status": "alive"}
+
+
+@app.get("/health/ready", include_in_schema=False)
+def ready():
+    ok = pilot.ready()
+    return JSONResponse({"status": "ready" if ok else "not_ready"}, status_code=200 if ok else 503)
 
 
 @app.get("/api/config")
@@ -247,18 +286,38 @@ def get_config() -> dict[str, Any]:
 @app.post("/api/newbie/ask")
 def newbie_ask(body: AskIn, p: auth.Principal = Depends(require("newbie"))) -> dict[str, Any]:
     own_employee(p, body.employee_id)
-    try:
-        return runtime.ask(
-            body.question, employee_id=body.employee_id, session_id=body.session_id
-        )
-    except ValueError as exc:
-        raise HTTPException(404, str(exc)) from exc
+    if not body.question.strip():
+        raise HTTPException(400, "请输入问题")
+    def run(sid):
+        pending = runtime._pending_from({}, sid) if body.session_id else None
+        if pending:
+            raise HTTPException(409, "请先确认或取消上一笔待处理操作")
+        return runtime.ask(body.question, employee_id=p.username, session_id=sid, as_of=body.as_of)
+    return reliability.run_once(p.username, body.request_id, "ask", body.model_dump(mode="json"), run)
 
 
 @app.post("/api/newbie/confirm")
 def newbie_confirm(body: ConfirmIn, p: auth.Principal = Depends(require("newbie"))) -> dict[str, Any]:
     """H2 确认框上点了确认 / 取消——从 checkpoint 恢复。"""
-    return runtime.resume(body.session_id, confirmed=body.confirmed)
+    reliability.require_session(p.username, body.session_id)
+    def run(sid):
+        state = runtime._full_state(sid) or {}
+        pending = runtime._pending_from(state, sid)
+        if pending and pending.get("action_id") == body.action_id:
+            if state.get("employee_id") != p.username:
+                raise HTTPException(403, "操作不属于当前账号")
+            return runtime.resume(sid, confirmed=body.confirmed)
+        if state.get("_action_id") == body.action_id and not pending:
+            from .state import summarize
+            return {**summarize(state), "pending_action": None}
+        # A worker may have died after ticket commit but before checkpoint commit.
+        with db.get_session() as s:
+            receipt = s.get(reliability.TicketReceipt, body.action_id)
+            if body.confirmed and receipt and receipt.owner == p.username:
+                return {"session_id": sid, "route": "answer", "cost": 0, "pending_action": None,
+                    "answer": "此前已提交工单：" + receipt.ticket_id, "action_result": receipt.response}
+        raise HTTPException(409, "待确认操作已变化或不存在，请查看操作记录")
+    return reliability.run_once(p.username, "confirm_" + body.action_id, "confirm", body.model_dump(), run)
 
 
 @app.get("/api/newbie/{employee_id}/memory")
@@ -332,6 +391,8 @@ def newbie_push(employee_id: str, p: auth.Principal = Depends(require("newbie"))
 # ------------------------------------------------------------------ Mentor
 @app.get("/api/mentor/{mentor_id}/escalations")
 def mentor_escalations(mentor_id: str, p: auth.Principal = Depends(require("mentor"))) -> list[dict[str, Any]]:
+    if mentor_id != p.username:
+        raise HTTPException(403, "只能查看自己的待处理事项")
     session = db.get_session()
     try:
         return escalate.pending_for_mentor(session, mentor_id)
@@ -344,9 +405,13 @@ def mentor_answer(body: AnswerIn, p: auth.Principal = Depends(require("mentor"))
     """回答 → 沉淀为 L2 → 重建索引。飞轮的 03→04→05 步。"""
     session = db.get_session()
     try:
+        card = session.get(db.Escalation, body.escalation_id)
+        if card is None or card.mentor_id != p.username:
+            raise HTTPException(403, "该问题未分配给你")
+        own_employee(p, card.employee_id)
         r = escalate.answer_and_sink(
             session, body.escalation_id,
-            answer=body.answer, confirmed_by=p.display_name, sink=body.sink,
+            answer=body.answer, confirmed_by=p.username, sink=body.sink,
         )
         if not r.get("ok"):
             raise HTTPException(400, r.get("error", "处理失败"))
@@ -389,6 +454,8 @@ def mentor_kb_count(p: auth.Principal = Depends(require("mentor"))) -> dict[str,
 
 @app.get("/api/mentor/{mentor_id}/mentees")
 def mentor_mentees(mentor_id: str, p: auth.Principal = Depends(require("mentor"))) -> list[dict[str, Any]]:
+    if mentor_id != p.username:
+        raise HTTPException(403, "只能查看自己的带教列表")
     session = db.get_session()
     try:
         rows = session.query(db.Employee).filter_by(mentor_id=mentor_id).all()
@@ -441,16 +508,6 @@ def hr_dashboard(p: auth.Principal = Depends(require("hr"))) -> dict[str, Any]:
             "topics": _cohort_topics(session, emps),
             "note": "提问原文、个人画像、对个人的评价性推断，产品不向 HR 提供，也不生成。",
         }
-    finally:
-        session.close()
-
-
-@app.get("/api/hr/view/{employee_id}")
-def hr_view(employee_id: str, p: auth.Principal = Depends(require("hr"))) -> dict[str, Any]:
-    own_employee(p, employee_id)
-    session = db.get_session()
-    try:
-        return memory.for_viewer(session, employee_id, "hr")
     finally:
         session.close()
 
@@ -666,6 +723,11 @@ def admin_user_update(body: dict,
     if username == p.username and body.get("active") is False:
         raise HTTPException(400, "不能停用自己——那是把自己锁在门外")
     kw: dict[str, Any] = {}
+    if "active" in body and type(body["active"]) is not bool:
+        raise HTTPException(400, "激活状态必须为布尔值")
+    for field in ("role", "new_password", "display_name", "team", "title", "domain", "onboard_date", "mentor"):
+        if field in body and body[field] is not None and not isinstance(body[field], str):
+            raise HTTPException(400, "成员字段格式不正确")
     for k in ("role", "active", "new_password", "display_name",
               "team", "title", "domain", "onboard_date", "mentor"):
         if k in body:
@@ -673,6 +735,9 @@ def admin_user_update(body: dict,
     ok, msg = auth.update_user(username, **kw)
     if not ok:
         raise HTTPException(400, msg)
+    with db.get_session() as s:
+        reliability.audit(s, p.username, "member:updated", username, {"fields": list(kw)})
+        s.commit()
     return {"ok": True, "message": msg,
             "users": auth.list_users(), "mentors": auth.mentors()}
 
@@ -763,6 +828,7 @@ def admin_external(p: auth.Principal = Depends(require("admin"))) -> dict[str, A
             "systems": external.status(ses),
             "config": {k: v for k, v in conf.items() if not k.startswith("_")},
             "demo_loaded": demo.is_loaded(ses),
+            "demo_load_allowed": __import__('os').getenv('RAMP_ALLOW_DEMO_LOAD', '0') == '1',
             "demo_manifest": demo.manifest(ses),
             "mentors": [{"username": u.username, "label": u.label()}
                         for u in _people(ses)],
@@ -793,7 +859,12 @@ def admin_external_save(body: dict[str, Any],
         raise HTTPException(400, f"未知配置项：{key}")
     ses = db.get_session()
     try:
+        try:
+            external.validate_config(ses, key, body.get("value"))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
         external.set_config(ses, key, body.get("value"))
+        reliability.audit(ses, p.username, 'config:updated', key)
         ses.commit()
         return {"ok": True, "systems": external.status(ses)}
     finally:
@@ -841,6 +912,28 @@ def admin_profile_save(employee_id: str, body: dict[str, Any],
     try:
         if ses.get(auth.User, employee_id) is None:
             raise HTTPException(404, "没有这个账号")
+        import math
+        try:
+            for field in ('social_status', 'fund_status'):
+                if field in body and body[field] not in ('unknown', 'paid', 'pending', 'not_started'):
+                    raise ValueError('缴纳状态不合法')
+            for field, catalog in (('docs', 'doc_catalog'), ('granted', 'entitlement_catalog')):
+                if field in body:
+                    values = body[field]
+                    if not isinstance(values, list) or any(not isinstance(v, str) or v not in (external.get_config(ses, catalog) or {}) for v in values):
+                        raise ValueError('材料或权限必须从已配置目录中选择')
+            if body.get('fund_base') not in (None, ''):
+                value = body['fund_base']
+                if isinstance(value, bool) or str(int(value)) != str(value) or not 0 <= int(value) <= 10000000:
+                    raise ValueError('公积金基数必须为有效非负整数')
+            if 'leave_used' in body:
+                used = float(body.get('leave_used') or 0)
+                if not math.isfinite(used) or not 0 <= used <= 366:
+                    raise ValueError('已休天数须在0至366之间')
+            if body.get('social_from'):
+                date.fromisoformat(body['social_from'])
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise HTTPException(400, '业务状态格式不正确：' + str(exc))
         row = external.profile(ses, employee_id)
         if row is None:
             row = db.ExtProfile(employee_id=employee_id)
@@ -858,6 +951,7 @@ def admin_profile_save(employee_id: str, body: dict[str, Any],
                 setattr(row, f, list(body.get(f) or []))
         if "leave_used" in body:
             row.leave_used = float(body.get("leave_used") or 0)
+        reliability.audit(ses, p.username, 'profile:updated', employee_id, {'fields': sorted(body.keys())})
         ses.commit()
         return {"ok": True}
     finally:
@@ -873,6 +967,9 @@ def admin_demo(body: dict[str, Any],
     清空只删装载器自己建的东西，**你自己注册的账号一律不碰**。
     """
     action = str(body.get("action") or "")
+    import os
+    if action == "load" and os.getenv("RAMP_ALLOW_DEMO_LOAD", "0") != "1":
+        raise HTTPException(403, "团队试用环境不允许一键创建共享密码演示账号；请逐个注册并激活")
     if action == "load":
         return demo.load()
     if action == "clear":
@@ -880,87 +977,9 @@ def admin_demo(body: dict[str, Any],
     raise HTTPException(400, "action 只能是 load 或 clear")
 
 
-@app.get("/api/admin/knowledge")
-def admin_kb_list(p: auth.Principal = Depends(require("admin"))) -> dict[str, Any]:
-    """管理端的知识库列表。
-
-    比 `/ops/knowledge` 多返回 source_name / confirmed_by / effective_from /
-    expires_on——运营只需要"能看见底牌"，管理员要**改**，改就得拿到全部字段。
-    少一个字段，编辑表单一保存就会把它清空。
-    """
-    ses = db.get_session()
-    try:
-        rows = ses.query(db.Knowledge).order_by(db.Knowledge.id.desc()).all()
-        return {"total": len(rows), "items": [{
-            "id": r.id, "domain": r.domain,
-            "question": r.question, "answer": r.answer,
-            "source_level": r.source_level, "source_name": r.source_name,
-            "confirmed_by": r.confirmed_by,
-            "effective_from": r.effective_from.isoformat() if r.effective_from else None,
-            "expires_on": r.expires_on.isoformat() if r.expires_on else None,
-            "hit_count": r.hit_count, "stale": r.is_stale, "citation": r.cite(),
-        } for r in rows]}
-    finally:
-        ses.close()
-
-
-@app.post("/api/admin/knowledge/save")
-def admin_kb_save(body: dict,
-                  p: auth.Principal = Depends(require("admin"))) -> dict[str, Any]:
-    """新增或修改一条知识。保存后**立刻重建索引**——
-    否则管理员改完看不到效果，会以为没生效。"""
-    from datetime import date as _date
-
-    from . import knowledge as K
-
-    ses = db.get_session()
-    try:
-        kid = body.get("id")
-        if kid:
-            row = ses.get(db.Knowledge, int(kid))
-            if row is None:
-                raise HTTPException(404, "条目不存在")
-            for f in ("domain", "question", "answer", "source_level",
-                      "source_name", "confirmed_by"):
-                if f in body:
-                    setattr(row, f, body[f] or None)
-            for f in ("effective_from", "expires_on"):
-                if f in body:
-                    setattr(row, f, _date.fromisoformat(body[f]) if body[f] else None)
-            row.embedding = K.embeddings.encode_one(row.question + " " + row.answer)
-            ses.commit()
-            out = {"ok": True, "id": row.id, "message": "已更新"}
-        else:
-            row = K.add_knowledge(
-                ses, domain=body.get("domain", "hr"),
-                question=body.get("question", ""), answer=body.get("answer", ""),
-                source_level=body.get("source_level", "L2"),
-                source_name=body.get("source_name", "管理后台录入"),
-                confirmed_by=body.get("confirmed_by") or None,
-            )
-            out = {"ok": True, "id": row.id, "message": "已新增"}
-    finally:
-        ses.close()
-    K.reload_index()
-    return out
-
-
-@app.post("/api/admin/knowledge/delete")
-def admin_kb_delete(body: dict,
-                    p: auth.Principal = Depends(require("admin"))) -> dict[str, Any]:
-    from . import knowledge as K
-
-    ses = db.get_session()
-    try:
-        row = ses.get(db.Knowledge, int(body.get("id", 0)))
-        if row is None:
-            raise HTTPException(404, "条目不存在")
-        ses.delete(row)
-        ses.commit()
-    finally:
-        ses.close()
-    K.reload_index()
-    return {"ok": True, "message": "已删除"}
+from .knowledge_api import router as knowledge_router
+app.include_router(knowledge_router(require))
+app.include_router(service_api.router(current, require))
 
 
 @app.get("/api/ops/guardrails")

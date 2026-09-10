@@ -1,6 +1,11 @@
 # ── 密钥。这一行是整个文件里最重要的一行 ──
 .env
 *.key
+*.pem
+backups/
+runtime/
+*.sql.gz
+*.tar.gz
 
 # ── 依赖与缓存 ──
 .venv/

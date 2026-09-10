@@ -13,12 +13,14 @@ const money = v => '¥' + Number(v || 0).toFixed(4);
 const j = (m, b) => ({ method: m, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
 
 async function api(p, o) {
-  const r = await fetch('/api' + p, o);
+  let r;
+  try { r = await fetch('/api' + p, o); }
+  catch(e) { throw new Error('网络中断，操作可能已受理。请查询操作记录或重试同一个请求，不要重复创建申请。'); }
   if (r.status === 401) { location.href = '/login'; throw new Error('会话已过期'); }
   if (!r.ok) {
     let m = r.statusText;
     try { m = (await r.json()).detail || m; } catch (e) {}
-    throw new Error(m);
+    throw new Error(typeof m === 'string' ? m : '输入格式不正确，请检查必填项和长度。');
   }
   return r.status === 204 ? null : r.json();
 }
@@ -48,7 +50,7 @@ async function mount(current) {
       `<a href="${href}"${href === current ? ' aria-current="page"' : ''}>${label}</a>`).join('');
   const hd = el(`<header class="hd">
     <div class="logo"><div class="dot"></div><div><b>爬坡 Ramp</b><em>ONBOARDING AGENT</em></div></div>
-    <nav class="nav">${nav}</nav>
+    <nav class="nav">${nav}<a href="/workspace">工单与试用</a></nav>
     <span class="st" id="hs" style="margin-left:auto"><span class="spin"></span> 连接中…</span>
     <span class="who"><b>${esc(me.display_name)}</b> · ${esc(me.role_label)}
       <button id="lo">登出</button></span>
@@ -70,7 +72,7 @@ async function mount(current) {
     document.body.insertBefore(b, hd);
   }
   $('#lo').onclick = async () => {
-    try { await api('/logout', { method: 'POST' }); } catch (e) {}
+    try { await api('/logout', j('POST', {})); } catch (e) {}
     location.href = '/login';
   };
   api('/health').then(h => {

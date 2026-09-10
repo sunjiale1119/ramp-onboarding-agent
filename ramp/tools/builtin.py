@@ -91,7 +91,8 @@ def _emp_id(ctx: dict[str, Any]) -> str:
 def knowledge_search(query: str, top_k: int = 3, *, _context: dict[str, Any]) -> dict[str, Any]:
     from .. import knowledge
 
-    r = knowledge.search(query, domain=_context.get("domain"), top_k=min(max(top_k, 1), 5))
+    r = knowledge.search(query, domain=_context.get("domain"), top_k=min(max(top_k, 1), 5),
+                         scope=_context.get("knowledge_scope"), as_of=_context.get("knowledge_as_of"))
     return {
         "best_score": round(r.best_score, 4),
         "confident": r.confident,
@@ -201,7 +202,7 @@ def it_entitlements(resource: str | None = None, *, _context: dict[str, Any]) ->
         "properties": {
             "resource": {"type": "string", "description": "申请的权限资源名，如 prod-db:ro、vpn、ga-dashboard"},
             "reason": {"type": "string", "description": "业务理由，一句话说明为什么需要。审批人主要看这一栏，不要写空话。"},
-            "duration_days": {"type": "integer", "description": "申请时长（天），默认 90，到期自动回收", "default": 90},
+            "duration_days": {"type": "integer", "description": "申请时长（1–365 天），默认 90；真实权限开通和回收由 IT 执行", "default": 90},
         },
         "required": ["resource", "reason"],
     },
@@ -220,12 +221,15 @@ def it_create_ticket(
     ses = db.get_session()
     try:
         if _preview:
+            from .. import ticketing
+            ticketing.validate(ses, eid, resource, reason, duration_days)
             # 只回显，不落库 —— 真正的提交在用户确认之后。
             # 审批人由适配层从 username 解析成真人；解析不出就是
             # "由 IT 服务台按资源自动分派"，**不编名字**。
             return {"preview": True,
                     "fields": external.ticket_fields(ses, eid, resource, reason, duration_days)}
-        return external.create_ticket(ses, eid, resource, reason, duration_days)
+        return external.create_ticket(ses, eid, resource, reason, duration_days,
+            action_id=_context.get("action_id"), expected_fields=_context.get("expected_fields"))
     except external.NotConnected as exc:
         raise _translate(exc) from None
     finally:

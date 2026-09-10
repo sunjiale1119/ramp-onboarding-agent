@@ -61,6 +61,8 @@ def run(*, reset: bool = False, verbose: bool = True) -> dict[str, int]:
     else:
         say(f"→ 管理员 {auth.ADMIN_USERNAME} 已存在，跳过")
 
+    from .knowledge_versions import migrate
+    migrate()
     knowledge.reload_index()
     say(f"✓ 完成。索引 {knowledge.index().size} 条。")
     return stats

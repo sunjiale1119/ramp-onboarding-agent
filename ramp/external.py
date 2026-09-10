@@ -48,7 +48,6 @@ from . import config, db
 PROBATION_MONTHS = 3       # 试用期，与知识库《员工手册》一致
 SOCIAL_CUTOFF_DAY = 20     # 社保每月申报截止日：当月 20 号前入职算当月，否则次月
 ANNUAL_LEAVE_BASE = 5      # 全年年假基数（天）
-TICKET_START_NO = 10001
 
 
 class NotConnected(Exception):
@@ -65,7 +64,11 @@ class NotConnected(Exception):
 
 
 def mode() -> str:
-    return (config.EXTERNAL_MODE or "builtin").strip().lower()
+    chosen = (config.EXTERNAL_MODE or "builtin").strip().lower()
+    # An unimplemented "live" mode must never quietly use the built-in simulator.
+    if chosen not in ("off", "builtin"):
+        raise NotConnected("外部系统", "live 适配器尚未实现")
+    return chosen
 
 
 # ---- 能算的：一律现算，不存 -------------------------------------------
@@ -99,12 +102,7 @@ def probation_of(onboard: date, today: date | None = None) -> dict[str, Any]:
 
 
 def annual_leave_of(onboard: date, used: float = 0.0, today: date | None = None) -> dict[str, Any]:
-    """年假额度，按《职工带薪年休假条例》折算。
-
-    新进职工当年度年休假 = 当年剩余日历天数 ÷ 365 × 全年应享天数，
-    **不足 1 整天的部分不计**。这是法规里的算法，不是我编的系数 ——
-    所以它属于"能算的"，不该进数据库。
-    """
+    """演示规则推算，不掌握累计工龄等完整条件，不代表法定或实际额度。"""
     today = today or date.today()
     if onboard.year < today.year:
         total = float(ANNUAL_LEAVE_BASE)
@@ -117,10 +115,7 @@ def annual_leave_of(onboard: date, used: float = 0.0, today: date | None = None)
 
 
 def social_start_month(onboard: date) -> dict[str, Any]:
-    """社保起缴月：当月 20 号前入职算当月，否则次月。
-
-    这是社保申报的月度节点决定的，不是随便定的 —— 所以同样能算。
-    """
+    """演示假设：以固定申报日推算，不代表当地政策或实际缴纳月份。"""
     if onboard.day <= SOCIAL_CUTOFF_DAY:
         m = date(onboard.year, onboard.month, 1)
         why = f"入职日 {onboard.day} 号 ≤ 申报截止 {SOCIAL_CUTOFF_DAY} 号，当月起缴"
@@ -185,6 +180,31 @@ def set_config(session, key: str, value: Any) -> None:
         row.value = value
 
 
+def validate_config(session, key, value):
+    if not isinstance(value, dict) or len(value) > 300:
+        raise ValueError('配置必须为不超过300项的对象')
+    if any(not isinstance(k, str) or not 1 <= len(k) <= 64 for k in value):
+        raise ValueError('配置键须为1至64字')
+    catalog = get_config(session, 'entitlement_catalog') or {}
+    for k, v in value.items():
+        if key in ('entitlement_catalog', 'doc_catalog'):
+            if not isinstance(v, str) or not 1 <= len(v) <= 200:
+                raise ValueError('目录名称须为1至200字')
+        elif key == 'contacts':
+            if not isinstance(v, str) or resolve(session, v) is None:
+                raise ValueError('联系人必须是有效账号')
+        elif key == 'role_entitlements':
+            if not isinstance(v, list) or any(not isinstance(item, str) or item not in catalog for item in v):
+                raise ValueError('岗位权限必须引用已配置资源')
+        elif key == 'resource_approvers':
+            if k not in catalog or not isinstance(v, dict) or set(v) - {'username', 'sla_days'}:
+                raise ValueError('审批配置必须引用已配置资源')
+            if v.get('username') and (not isinstance(v['username'], str) or resolve(session, v['username']) is None):
+                raise ValueError('审批人必须是有效账号')
+            if 'sla_days' in v and (type(v['sla_days']) is not int or not 1 <= v['sla_days'] <= 365):
+                raise ValueError('审批预计时间须为1至365天')
+
+
 def all_config(session) -> dict[str, Any]:
     out = dict(DEFAULT_CONFIG)
     for row in session.query(db.ExtConfig).all():
@@ -215,12 +235,12 @@ def hr_field(session, employee_id: str, field: str) -> dict[str, Any]:
     # ---- 算得出来的两个字段 ----
     if field == "probation":
         return {"field": field, "value": probation_of(emp.onboard_date),
-                "source": "按入职日期与试用期规则推算"}
+                "source": "内置演示规则推算，不代表劳动合同约定，未随知识版本自动更新"}
     if field == "leave_balance":
         p = profile(session, employee_id)
         return {"field": field,
                 "value": annual_leave_of(emp.onboard_date, p.leave_used if p else 0.0),
-                "source": "按《职工带薪年休假条例》折算"}
+                "source": "内置演示规则推算，未核实累计工龄及实际已休记录，不代表法定或实际额度"}
 
     # ---- 需要录入的三个字段 ----
     p = profile(session, employee_id)
@@ -330,8 +350,8 @@ def entitlements(session, employee_id: str, resource: str | None = None) -> dict
         who = resolve(session, ap.get("username"))
         out["resource"] = resource
         out["already_granted"] = resource in granted
-        # 解析不出审批人时说"按资源自动分派"，**不编名字**
-        out["approver"] = who.label() if who else "由 IT 服务台按资源自动分派"
+        # 未配置即明确缺失，不能暗示系统已自动分派。
+        out["approver"] = who.label() if who else "尚未配置审批人，请联系管理员"
         out["sla_days"] = ap.get("sla_days")
     return out
 
@@ -350,43 +370,19 @@ def ticket_fields(session, employee_id: str, resource: str,
         "申请人": me.label() if me else employee_id,
         "权限项": resource,
         "理由": reason,
-        "审批人": who.label() if who else "由 IT 服务台按资源自动分派",
-        "时长": f"{duration_days} 天，到期自动回收",
+        "审批人": who.label() if who else "尚未配置审批人，请联系管理员",
+        "时长": f"申请 {duration_days} 天；真实开通及回收由 IT 执行",
         "预计时长": f"{sla} 个工作日" if sla else "以 IT 服务台的分派结果为准",
     }
 
 
 def create_ticket(session, employee_id: str, resource: str,
-                  reason: str, duration_days: int = 90) -> dict[str, Any]:
+                  reason: str, duration_days: int = 90, *, action_id=None, expected_fields=None) -> dict[str, Any]:
     if mode() == "off":
         raise NotConnected("IT 工单系统", "提交权限申请工单")
 
-    conf = all_config(session)
-    ap = (conf.get("resource_approvers") or {}).get(resource) or {}
-    sla = ap.get("sla_days")
-    last = session.query(db.Ticket).order_by(db.Ticket.id.desc()).first()
-    no = (int(last.ticket_id.split("-")[-1]) + 1) if last else TICKET_START_NO
-
-    t = db.Ticket(
-        ticket_id=f"IT-{no}",
-        employee_id=employee_id,
-        resource=resource,
-        reason=reason,
-        duration_days=duration_days,
-        submitted_on=date.today(),
-        approver=ap.get("username"),
-        expected_by=(date.today() + timedelta(days=sla)) if sla else None,
-    )
-    session.add(t)
-    session.commit()
-    return {
-        "ticket_id": t.ticket_id,
-        "fields": ticket_fields(session, employee_id, resource, reason, duration_days),
-        "status": t.status,
-        "submitted_on": t.submitted_on.isoformat(),
-        "expected_by": t.expected_by.isoformat() if t.expected_by else None,
-        "revocable_until_minutes": 5,
-    }
+    from . import ticketing
+    return ticketing.create(session, employee_id, resource, reason, duration_days, action_id, expected_fields)
 
 
 # ---- 给后台看的接入状态 ------------------------------------------------

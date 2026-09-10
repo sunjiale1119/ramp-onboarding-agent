@@ -152,7 +152,8 @@ def waterfall(session_id: str) -> list[dict[str, Any]]:
                 "cost": r.cost,
                 "ms": r.duration_ms,
                 "ok": r.ok,
-                "detail": r.detail or {},
+                "detail": {k: v for k, v in (r.detail or {}).items()
+                           if k in ("domain", "route", "tier", "degraded", "confidence", "needs_confirmation")},
             }
             for r in rows
         ]

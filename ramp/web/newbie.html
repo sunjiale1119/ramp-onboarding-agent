@@ -10,17 +10,21 @@
 <div class="page">
   <div class="head2">
     <div><h2 id="nb-title">加载中…</h2><div class="sub" id="nb-sub"></div></div>
-    <div class="vm"><span>本次会话 <b id="c-turn">0</b> 轮</span><span>累计成本 <b id="c-cost">¥0.0000</b></span><span>路径 <b id="c-route">—</b></span></div>
+    <div class="vm"><span>本页处理 <b id="c-turn">0</b> 次</span><span>本次返回成本 <b id="c-cost">¥0.0000</b></span><span>路径 <b id="c-route">—</b></span></div>
   </div>
   <div class="shell">
     <div class="chatwrap">
       <div>
         <div class="stream" id="stream"></div>
         <div class="ask">
+          <label for="kb-as-of">制度适用日期（留空按今天，历史事项请选日期）</label>
+          <input id="kb-as-of" type="date" style="max-width:200px;margin-bottom:8px">
           <div class="askrow">
             <input id="q" placeholder="问点什么…（真实调用后端，会花钱）" autocomplete="off">
             <button class="btn pri" id="send">发送</button>
           </div>
+          <div class="chips"><button class="btn" id="retry-last">查询 / 恢复上次请求</button><button class="btn" id="new-session">新会话</button><a href="/workspace">我的工单、操作记录与试用反馈</a></div>
+          <p id="request-status" role="status"></p>
           <div class="chips" id="chips">
             <button class="chip" data-q="试用期多久？转正要交什么材料？"><i>L0</i>试用期与转正材料</button>
             <button class="chip" data-q="我的社保开始交了吗？"><i>L1</i>我的社保交了吗</button>
@@ -42,15 +46,17 @@
 </div>
 
 <div class="back" id="back" role="dialog" aria-modal="true"><div class="modal">
-  <div class="mh"><b>执行前确认 · H2</b><p>Ramp 将代你在外部系统写入以下内容</p></div>
+  <div class="mh"><b>执行前确认</b><p>将在本项目的内置工单系统创建申请，不直接开通企业权限</p></div>
   <div class="mb" id="m-fields"></div>
-  <div class="mf"><span class="hint" style="margin-right:auto">提交后有 5 分钟撤回窗口</span>
+  <div class="mf"><span class="hint" style="margin-right:auto">待审批时可在我的工单中取消</span>
     <button class="btn" id="m-no">取消</button><button class="btn pri" id="m-ok">确认提交</button></div>
 </div></div>
 
 <script src="/_shared.js"></script>
 <script>
 let ME = null, EMP = null, sid = null, turns = 0, cost = 0;
+let busy = false, pendingAction = null, lastJob = null;
+function keepJob(job) { lastJob = job; sessionStorage.setItem('ramp-job-' + EMP, JSON.stringify(job)); }
 
 function bubble(r) {
   const bd = [];
@@ -69,32 +75,43 @@ function bubble(r) {
 }
 
 async function ask(text) {
-  if (!text.trim()) return;
-  $('#send').disabled = true; $('#q').value = '';
+  if (busy || !ME || !text.trim()) return;
+  if (pendingAction) { showConfirm(pendingAction); return; }
+  keepJob({path:'/newbie/ask', body:{question:text, employee_id:EMP, session_id:sid,
+    request_id:Array.from(crypto.getRandomValues(new Uint8Array(16)), x=>x.toString(16).padStart(2,'0')).join(''), as_of:$('#kb-as-of').value || null}});
+  await sendJob(lastJob, text);
+}
+
+async function sendJob(job, text) {
+  if(busy) return; busy=true;
+  $('#send').disabled = true;
   const initial = esc((ME.display_name || '我').slice(0, 1));
   $('#stream').appendChild(el('<div class="msg me"><div class="av">' + initial +
-    '</div><div class="bub"><div class="said">' + esc(text) + '</div></div></div>'));
+    '</div><div class="bub"><div class="said">' + esc(text || '恢复上次请求') + '</div></div></div>'));
   const wait = el('<div class="msg ai"><div class="av">R</div><div class="bub"><div class="said"><span class="spin"></span> 思考中…</div></div></div>');
   $('#stream').appendChild(wait); $('#stream').scrollTop = 1e9;
   try {
-    const r = await api('/newbie/ask', j('POST', { question: text, employee_id: EMP, session_id: sid }));
-    sid = r.session_id; turns++; cost += r.cost || 0;
+    const r = await api(job.path, j('POST', job.body));
+    sid = r.session_id; sessionStorage.setItem('ramp-sid-' + EMP, sid); turns++; cost = r.cost || 0;
+    $('#q').value = ''; $('#request-status').textContent = '请求已处理；重复恢复不会重新创建工单。';
     $('#c-turn').textContent = turns;
     $('#c-cost').textContent = money(cost);
     $('#c-route').textContent = r.route || '—';
     wait.replaceWith(el(bubble(r)));
-    if (r.pending_action) showConfirm(r.pending_action);
+    pendingAction = r.pending_action || null;
+    if (pendingAction) showConfirm(pendingAction);
     if (r.escalation_id) toast('已生成升级卡片 #' + r.escalation_id);
     loadMemory();
   } catch (e) {
     wait.querySelector('.said').innerHTML = '<span class="err">请求失败：' + esc(e.message) + '</span>';
   }
-  $('#send').disabled = false;
+  $('#send').disabled = false; busy=false;
   $('#stream').scrollTop = 1e9;
 }
 
 function showConfirm(p) {
-  const f = (p.preview && p.preview.fields) || {};
+  pendingAction = p;
+  const f = (p.preview && p.preview.fields) || p.fields || {};
   $('#m-fields').innerHTML = Object.entries(f).map(function (kv) {
     return '<div class="fld"><i>' + esc(kv[0]) + '</i><u>' + esc(kv[1]) + '</u></div>';
   }).join('') || '<div class="fld"><i>工具</i><u>' + esc(p.tool || '') + '</u></div>';
@@ -102,17 +119,14 @@ function showConfirm(p) {
 }
 
 async function resume(ok) {
+  if(busy || !pendingAction) return;
+  keepJob({path:'/newbie/confirm', body:{session_id:sid, confirmed:ok, action_id:pendingAction.action_id}});
   $('#back').classList.remove('on');
-  const wait = el('<div class="msg ai"><div class="av">R</div><div class="bub"><div class="said"><span class="spin"></span> 提交中…</div></div></div>');
-  $('#stream').appendChild(wait);
-  try {
-    const r = await api('/newbie/confirm', j('POST', { session_id: sid, confirmed: ok, employee_id: EMP }));
-    cost += r.cost || 0; $('#c-cost').textContent = money(cost);
-    wait.replaceWith(el(bubble(r))); toast(ok ? '已提交' : '已取消');
-  } catch (e) {
-    wait.querySelector('.said').innerHTML = '<span class="err">' + esc(e.message) + '</span>';
-  }
+  await sendJob(lastJob, ok ? '确认申请' : '取消申请');
 }
+
+$('#retry-last').onclick = function(){ if(lastJob) sendJob(lastJob); else $('#request-status').textContent='没有待恢复请求'; };
+$('#new-session').onclick = function(){ if(busy) return; if(pendingAction){showConfirm(pendingAction);return;} sid=null; lastJob=null; sessionStorage.removeItem('ramp-sid-'+EMP); sessionStorage.removeItem('ramp-job-'+EMP); $('#request-status').textContent='已切换新会话，旧记录仍保留在操作记录中。'; };
 
 async function loadMemory() {
   try {
@@ -167,12 +181,9 @@ $('#memo').onclick = async function (e) {
 (async function () {
   ME = await mount('/newbie'); if (!ME) return;
   EMP = ME.employee_id;
-  if (!EMP) {
-    $('#nb-title').textContent = '这个账号还没绑定员工档案';
-    $('#nb-sub').innerHTML = '请管理员在后台把 <code>employee_id</code> 填上——没有档案就没有入职进度、没有记忆，也没法提问。';
-    $('#send').disabled = true; $('#q').disabled = true;
-    return;
-  }
+  sid = sessionStorage.getItem('ramp-sid-' + EMP) || null;
+  try { lastJob = JSON.parse(sessionStorage.getItem('ramp-job-'+EMP) || 'null'); } catch(e) {}
+  if(lastJob) $('#request-status').textContent='可点击「查询 / 恢复上次请求」找回结果或确认卡片。';
   try {
     const p = await api('/newbie/' + EMP + '/profile');
     $('#nb-title').textContent = p.name + ' · ' + p.team + ' ' + p.role + ' · 入职第 ' + p.day + ' 天';
