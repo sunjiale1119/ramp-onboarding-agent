@@ -110,6 +110,12 @@ async function sendJob(job, text) {
 }
 
 function showConfirm(p) {
+  if (!p.action_id) {
+    pendingAction = null;
+    $('#back').classList.remove('on');
+    $('#request-status').textContent = '这是旧版本的待确认卡片，不能直接执行。请先查看已有工单，再点击新会话重新发起。';
+    return;
+  }
   pendingAction = p;
   const f = (p.preview && p.preview.fields) || p.fields || {};
   $('#m-fields').innerHTML = Object.entries(f).map(function (kv) {
@@ -126,7 +132,7 @@ async function resume(ok) {
 }
 
 $('#retry-last').onclick = function(){ if(lastJob) sendJob(lastJob); else $('#request-status').textContent='没有待恢复请求'; };
-$('#new-session').onclick = function(){ if(busy) return; if(pendingAction){showConfirm(pendingAction);return;} sid=null; lastJob=null; sessionStorage.removeItem('ramp-sid-'+EMP); sessionStorage.removeItem('ramp-job-'+EMP); $('#request-status').textContent='已切换新会话，旧记录仍保留在操作记录中。'; };
+$('#new-session').onclick = function(){ if(busy) return; if(pendingAction && !confirm('离开本次待确认操作并新开会话？未确认的操作不会因此执行；已经创建的工单不会取消，请先在工单页核查。')) return; pendingAction=null; $('#back').classList.remove('on'); sid=null; lastJob=null; sessionStorage.removeItem('ramp-sid-'+EMP); sessionStorage.removeItem('ramp-job-'+EMP); $('#request-status').textContent='已切换新会话；历史会话和已有工单仍保留，不代表取消申请。'; };
 
 async function loadMemory() {
   try {
