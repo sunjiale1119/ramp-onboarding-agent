@@ -52,7 +52,7 @@ def _not_connected(system: str, what: str) -> ToolError:
 
 def _translate(exc: external.NotConnected) -> ToolError:
     """把适配层的"没有可用数据"翻译成给用户看的话。"""
-    return _not_connected(exc.system, exc.what)
+    return ToolError('没有可用业务数据', user_message=f'查询来源：{exc.system}。{exc.what}。\n请联系对应的数据负责人核实；缺失或过期不等于尚未办理，不能用制度推算你的个人状态。')
 
 
 def mock() -> dict[str, Any]:
@@ -105,7 +105,8 @@ def knowledge_search(query: str, top_k: int = 3, *, _context: dict[str, Any]) ->
 @registry.add(
     name="hr_query",
     description=(
-        "查询**当前用户本人**的 HR 档案数据：社保、公积金、入职材料、试用期与转正日期、假期余额。"
+        "查询**当前用户本人**的已确认业务快照：社保、公积金、入职材料、合同试用期结束日、假期余额。"
+        "回答须注明来源与数据截至日期；合同结束日不能证明已经通过转正审批。"
         "只能查本人，不接受员工姓名或工号参数。"
     ),
     parameters={

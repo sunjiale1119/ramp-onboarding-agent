@@ -57,7 +57,7 @@ def run(*, reset: bool = False, verbose: bool = True) -> dict[str, int]:
 
     stats["users"] = auth.seed_users()
     if stats["users"]:
-        say(f"→ 已创建管理员 {auth.ADMIN_USERNAME}（密码 {auth.ADMIN_PASSWORD}）")
+        say(f"→ 已创建管理员 {auth.ADMIN_USERNAME}（凭据来自部署配置，不写入日志）")
     else:
         say(f"→ 管理员 {auth.ADMIN_USERNAME} 已存在，跳过")
 

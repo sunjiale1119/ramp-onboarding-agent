@@ -33,6 +33,9 @@ def ready():
             # Missing migrations are a readiness failure, not a fake healthy status.
             s.query(rel.RequestReceipt.id).limit(1).all()
             s.query(Feedback.id).limit(1).all()
+            from .enterprise import BusinessRecord, Delivery
+            s.query(BusinessRecord.id).limit(1).all()
+            s.query(Delivery.ticket_id).limit(1).all()
         return versioned
     except Exception:
         return False

@@ -253,14 +253,15 @@ class ControlsTest(unittest.TestCase):
                           ('resource_approvers',{'vpn':{'sla_days':-1}}),('entitlement_catalog',[]),
                           ('role_entitlements',{'newbie':['unknown']})):
             self.assertEqual(self.client.post('/api/admin/external/config',json={'key':key,'value':value}).status_code,400)
-        self.assertEqual(self.client.post('/api/admin/external/config',json={'key':'contacts','value':{'hr':'mentor1'}}).status_code,200)
+        revision=self.client.get('/api/enterprise/catalog').json()['revision']
+        self.assertEqual(self.client.post('/api/admin/external/config',json={'key':'contacts','value':{'hr':'mentor1'},'expected_revision':revision}).status_code,200)
 
     def test_admin_rejects_invalid_business_state(self):
         self.actor('admin')
         for body in ({'fund_base':'abc'},{'fund_base':-1},{'leave_used':-2},{'leave_used':'NaN'},
                      {'social_from':'not-date'},{'social_status':'made-up'},{'granted':['unknown']}):
-            self.assertEqual(self.client.post('/api/admin/profile/alice',json=body).status_code,400)
-        self.assertEqual(self.client.post('/api/admin/profile/alice',json={'social_status':'pending','granted':['vpn'],'leave_used':1}).status_code,200)
+            self.assertEqual(self.client.post('/api/admin/profile/alice',json=body).status_code,410)
+        self.assertEqual(self.client.post('/api/admin/profile/alice',json={'social_status':'pending','granted':['vpn'],'leave_used':1}).status_code,410)
 
     def test_registration_cannot_self_assign_admin(self):
         response=self.client.post('/api/register',json=dict(username='untrusted',password='test-password',display_name='test',role='admin',active=True))

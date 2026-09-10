@@ -18,12 +18,12 @@ def main():
         assert not any('ALL PRIVILEGES' in g or 'GRANT OPTION' in g or ' DROP' in g for g in grants)
         assert any('`ramp`.*' in g for g in grants), 'Missing database-scoped grants'
         counts = {name: s.execute(text(f'SELECT COUNT(*) FROM `{name}`')).scalar()
-                  for name in ('users', 'sessions', 'messages', 'tickets')}
+                  for name in ('users', 'sessions', 'messages', 'tickets', 'business_records', 'ticket_deliveries')}
     MySQLSaver().get_tuple({'configurable': {'thread_id': 'release-read-only-probe'}})
     with httpx.Client(base_url='http://127.0.0.1:8000', timeout=20) as c:
         for path in ('/health/live', '/health/ready', '/login'):
             assert c.get(path).status_code == 200, 'Unhealthy: ' + path
-        for path in ('/api/tickets', '/api/health', '/api/admin/users'):
+        for path in ('/api/tickets', '/api/health', '/api/admin/users', '/api/enterprise/catalog', '/api/enterprise/records/admin'):
             assert c.get(path).status_code == 401, 'Unauthenticated access: ' + path
         r = c.post('/api/login', json={'username': os.getenv('ADMIN_USERNAME', 'admin'),
                                      'password': os.getenv('ADMIN_PASSWORD', 'ramp2026')})
@@ -34,6 +34,8 @@ def main():
             assert c.get('/workspace').status_code == 200
             assert c.get('/api/admin/external').json()['demo_load_allowed'] is False
             assert c.get('/api/admin/users').status_code == 200
+            assert 'revision' in c.get('/api/enterprise/catalog').json()
+            assert c.get('/api/enterprise/ingest/revision?employee_id=admin&field=leave_balance').status_code == 400
         finally:
             c.post('/api/logout', json={})
         assert c.get('/api/tickets').status_code == 401

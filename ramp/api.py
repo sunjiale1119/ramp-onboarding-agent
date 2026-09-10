@@ -22,7 +22,7 @@ from fastapi import FastAPI, HTTPException, Cookie, Depends, Response
 from pydantic import BaseModel, Field
 
 from . import auth, config, db, demo, escalate, external, knowledge, memory, proactive, runtime, trace
-from . import reliability, pilot, security, service_api
+from . import reliability, pilot, security, service_api, enterprise
 
 app = FastAPI(title="爬坡 Ramp API", version="0.1.0")
 app.add_middleware(security.BoundaryMiddleware)
@@ -50,6 +50,7 @@ def _startup() -> None:
     migrate()  # Additive and idempotent; fail startup rather than serve unversioned knowledge.
     reliability.migrate()
     pilot.migrate()
+    enterprise.migrate()
     try:
         n = len(auth.list_users())
         log.info("[启动] 账号 %d 个", n)
@@ -827,6 +828,7 @@ def admin_external(p: auth.Principal = Depends(require("admin"))) -> dict[str, A
             "mode": external.mode(),
             "systems": external.status(ses),
             "config": {k: v for k, v in conf.items() if not k.startswith("_")},
+            "revision": enterprise.catalog_revision(ses),
             "demo_loaded": demo.is_loaded(ses),
             "demo_load_allowed": __import__('os').getenv('RAMP_ALLOW_DEMO_LOAD', '0') == '1',
             "demo_manifest": demo.manifest(ses),
@@ -854,21 +856,7 @@ def _people(ses) -> list:
 def admin_external_save(body: dict[str, Any],
                         p: auth.Principal = Depends(require("admin"))) -> dict[str, Any]:
     """保存一项外部系统配置。"""
-    key = str(body.get("key") or "")
-    if key not in external.DEFAULT_CONFIG:
-        raise HTTPException(400, f"未知配置项：{key}")
-    ses = db.get_session()
-    try:
-        try:
-            external.validate_config(ses, key, body.get("value"))
-        except ValueError as exc:
-            raise HTTPException(400, str(exc))
-        external.set_config(ses, key, body.get("value"))
-        reliability.audit(ses, p.username, 'config:updated', key)
-        ses.commit()
-        return {"ok": True, "systems": external.status(ses)}
-    finally:
-        ses.close()
+    return enterprise.configure(body, p)
 
 
 @app.get("/api/admin/profile/{employee_id}")
@@ -894,12 +882,7 @@ def admin_profile_get(employee_id: str,
             "doc_catalog": conf.get("doc_catalog") or {},
             "entitlement_catalog": conf.get("entitlement_catalog") or {},
             # 算出来的部分一并回传，让管理员看到"这些不用录"
-            "derived": ({
-                "probation": external.probation_of(emp.onboard_date),
-                "leave": external.annual_leave_of(emp.onboard_date,
-                                                  row.leave_used if row else 0.0),
-                "social_start": external.social_start_month(emp.onboard_date),
-            } if emp and emp.onboard_date else None),
+            "derived": None,
         }
     finally:
         ses.close()
@@ -908,54 +891,7 @@ def admin_profile_get(employee_id: str,
 @app.post("/api/admin/profile/{employee_id}")
 def admin_profile_save(employee_id: str, body: dict[str, Any],
                        p: auth.Principal = Depends(require("admin"))) -> dict[str, Any]:
-    ses = db.get_session()
-    try:
-        if ses.get(auth.User, employee_id) is None:
-            raise HTTPException(404, "没有这个账号")
-        import math
-        try:
-            for field in ('social_status', 'fund_status'):
-                if field in body and body[field] not in ('unknown', 'paid', 'pending', 'not_started'):
-                    raise ValueError('缴纳状态不合法')
-            for field, catalog in (('docs', 'doc_catalog'), ('granted', 'entitlement_catalog')):
-                if field in body:
-                    values = body[field]
-                    if not isinstance(values, list) or any(not isinstance(v, str) or v not in (external.get_config(ses, catalog) or {}) for v in values):
-                        raise ValueError('材料或权限必须从已配置目录中选择')
-            if body.get('fund_base') not in (None, ''):
-                value = body['fund_base']
-                if isinstance(value, bool) or str(int(value)) != str(value) or not 0 <= int(value) <= 10000000:
-                    raise ValueError('公积金基数必须为有效非负整数')
-            if 'leave_used' in body:
-                used = float(body.get('leave_used') or 0)
-                if not math.isfinite(used) or not 0 <= used <= 366:
-                    raise ValueError('已休天数须在0至366之间')
-            if body.get('social_from'):
-                date.fromisoformat(body['social_from'])
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise HTTPException(400, '业务状态格式不正确：' + str(exc))
-        row = external.profile(ses, employee_id)
-        if row is None:
-            row = db.ExtProfile(employee_id=employee_id)
-            ses.add(row)
-        for f in ("social_status", "fund_status"):
-            if body.get(f):
-                setattr(row, f, str(body[f]))
-        if "fund_base" in body:
-            row.fund_base = int(body["fund_base"]) if body.get("fund_base") else None
-        if "social_from" in body:
-            v = body.get("social_from")
-            row.social_from = date.fromisoformat(v) if v else None
-        for f in ("docs", "granted"):
-            if f in body:
-                setattr(row, f, list(body.get(f) or []))
-        if "leave_used" in body:
-            row.leave_used = float(body.get("leave_used") or 0)
-        reliability.audit(ses, p.username, 'profile:updated', employee_id, {'fields': sorted(body.keys())})
-        ses.commit()
-        return {"ok": True}
-    finally:
-        ses.close()
+    raise HTTPException(410, '旧业务录入接口已停用；请使用工单与试用页面的来源确认记录，旧数据仍保留供核对')
 
 
 @app.post("/api/admin/demo")
@@ -980,6 +916,7 @@ def admin_demo(body: dict[str, Any],
 from .knowledge_api import router as knowledge_router
 app.include_router(knowledge_router(require))
 app.include_router(service_api.router(current, require))
+app.include_router(enterprise.router(current))
 
 
 @app.get("/api/ops/guardrails")

@@ -313,7 +313,7 @@ def create_database() -> None:
     boot.dispose()
     from . import auth  # noqa: F401 —— 导入即注册 users / auth_sessions 到 metadata
     from . import knowledge_versions  # noqa: F401
-    from . import reliability, pilot  # noqa: F401
+    from . import reliability, pilot, enterprise  # noqa: F401
     Base.metadata.create_all(engine())
 
 
@@ -331,7 +331,7 @@ def ping() -> tuple[bool, str]:
             v = conn.execute(text("SELECT VERSION()")).scalar()
         return True, f"MySQL {v}"
     except Exception as exc:  # noqa: BLE001
-        return False, f"{type(exc).__name__}: {exc}"
+        return False, "数据库检查失败，请运维核查连接与版本；不向页面返回原始数据库异常"
 
 
 __all__ = [

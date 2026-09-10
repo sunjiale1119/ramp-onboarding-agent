@@ -114,13 +114,10 @@
   <!-- ---------------- 外部系统 ---------------- -->
   <div class="pane" data-pane="x"><div class="shell"><div class="pad">
     <div class="note" style="margin-bottom:14px"><span class="nt">四个系统按字段解锁，不是整体开关</span>
-      转正日期、年假额度、汇报线这些<b>能从入职日期和账号表算出来</b>，永远可用，不用录。<br>
-      社保、公积金、岗位权限清单要在这里配，<b>配一项解锁一项</b>；没配过的字段
-      Agent 会诚实说查不到，不会编。<br><br>
-      配置里所有的「人」存的都是<b>账号</b>，显示时去账号表解析。
-      上一版这里存的是名字，于是出现了一个叫「李敏」的审批人——
-      <b>而系统里根本没有李敏这个人</b>。名字一旦离开账号表，
-      就再也没有东西保证它对应一个真实存在的人。
+      组织关系来自有效账号；社保、年假、试用期等个人事项必须有<b>负责人确认的来源、日期和有效期</b>，不根据入职日期猜测。<br>
+      <a href="/workspace#service-setup">建立资源与材料目录</a>，再在本页分配联系人和审批账号。<br>
+      <a href="/workspace#business-records">维护带来源的业务记录</a>；记录缺失、过期或撤销时，Agent 提示重新核实。<br>
+      所有人选都引用有效账号；审批、实际办理与员工验收分别记录，不代表系统自动开通权限。
     </div>
 
     <div class="row" style="gap:8px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
@@ -367,25 +364,9 @@ function boxes(host, catalog, chosen, attr) {
 }
 
 async function loadProfile(username) {
-  $('#m-derived').textContent = '';
-  try {
-    PROF = await api('/admin/profile/' + encodeURIComponent(username));
-  } catch (e) { PROF = null; }
-  var isNew = ($('#m-role').value === 'newbie' || $('#m-role').value === 'mentor');
-  $('#m-ext').style.display = (PROF && isNew) ? '' : 'none';
-  if (!PROF || !isNew) return;
-  var p = PROF.profile;
-  statusSel('#m-social', p.social_status);
-  statusSel('#m-fund', p.fund_status);
-  boxes('#m-docs', PROF.doc_catalog, p.docs, 'doc');
-  boxes('#m-grant', PROF.entitlement_catalog, p.granted, 'grant');
-  if (PROF.derived) {
-    var d = PROF.derived;
-    $('#m-derived').textContent =
-      '以下三项算得出来，不用录：转正 ' + d.probation.probation_end +
-      '（第 ' + d.probation.day_index + ' 天）· 年假 ' + d.leave.total +
-      ' 天 · 社保应从 ' + d.social_start.month + ' 起缴';
-  }
+  PROF = null;
+  $('#m-ext').innerHTML = '<p>个人业务状态已迁移至「工单与试用 → 业务记录」，请填写来源与有效期后确认。</p><a href="/workspace#business-records">维护业务记录</a>';
+  $('#m-ext').style.display = '';
 }
 
 $('#m-role').onchange = function () {
@@ -396,12 +377,12 @@ $('#m-role').onchange = function () {
   var hints = {
     newbie: '新人：必须填入职日期，否则 30 天时间线和主动推送跑不起来。',
     mentor: 'Mentor：会出现在新人的 Mentor 下拉里，并能看到自己带的人的卡点信号。',
-    hr: 'HR：只能看部门级聚合，同批人数少于 3 时连占比都不显示。',
+    hr: 'HR：查看聚合看板，维护带来源的 HR 业务快照；不能查看个人聊天原文。',
     ops: '运营：能看调用链、评测报告和人工复核，看不到提问原文。',
     admin: '管理员：管账号和配置，<b>看不到任何人的提问原文</b>。'
   };
   $('#m-hint').innerHTML = hints[r] || '';
-  if ($('#m-ext')) { $('#m-ext').style.display = (needs && PROF) ? '' : 'none'; }
+  if ($('#m-ext')) { $('#m-ext').style.display = needs ? '' : 'none'; }
 };
 
 $('#m-cancel').onclick = function () { $('#back').classList.remove('on'); };
@@ -426,18 +407,6 @@ $('#m-save').onclick = async function () {
   $('#m-save').disabled = true;
   try {
     var r = await api('/admin/users/update', j('POST', body));
-    if (PROF && (role === 'newbie' || role === 'mentor')) {
-      await api('/admin/profile/' + encodeURIComponent(mUser.username), j('POST', {
-        social_status: $('#m-social').value,
-        fund_status: $('#m-fund').value,
-        docs: Array.prototype.map.call(
-          document.querySelectorAll('#m-docs input:checked'),
-          function (x) { return x.dataset.doc; }),
-        granted: Array.prototype.map.call(
-          document.querySelectorAll('#m-grant input:checked'),
-          function (x) { return x.dataset.grant; })
-      }));
-    }
     toast(r.message);
     MENTORS = r.mentors || MENTORS;
     renderUsers(r.users);
@@ -485,7 +454,7 @@ function personOpts(sel) {
 }
 
 async function saveExt(key, value) {
-  try { await api('/admin/external/config', j('POST', { key: key, value: value })); }
+  try { await api('/admin/external/config', j('POST', { key: key, value: value, expected_revision:EXT.revision })); }
   catch(e) { alert(e.message); }
   await loadExternal();
 }
@@ -535,11 +504,11 @@ function renderExt() {
               esc(cat[k]) + '</label>';
           }).join('') + '</td></tr>';
       }).join('') + '</tbody>'
-    : '<tbody><tr><td class="hint">还没有权限项目录。装载演示数据可以看到一份示例。</td></tr></tbody>';
+    : '<tbody><tr><td class="hint">还没有权限项目录。请到 <a href="/workspace#service-setup">企业服务配置</a> 建立目录，无需装载演示数据。</td></tr></tbody>';
 
   var ap = c.resource_approvers || {};
   $('#x-appr').innerHTML = keys.length
-    ? '<thead><tr><th>资源</th><th>审批账号</th><th>时长（工作日）</th></tr></thead><tbody>' +
+    ? '<thead><tr><th>资源</th><th>审批账号</th><th>时长（自然日）</th></tr></thead><tbody>' +
       keys.map(function (k) {
         var a = ap[k] || {};
         return '<tr><td>' + esc(cat[k]) + '<br><span class="n" style="font-size:11px">' +

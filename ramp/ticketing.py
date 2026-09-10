@@ -17,6 +17,10 @@ def validate(session, employee_id, resource, reason, duration_days):
         raise ValueError("请填写 1–2000 字的业务理由")
     if not isinstance(resource, str) or resource not in (external.all_config(session).get("entitlement_catalog") or {}):
         raise ValueError("资源不在可申请目录中，请联系管理员配置")
+    approver = (external.all_config(session).get('resource_approvers') or {}).get(resource) or {}
+    person = session.get(auth.User, approver.get('username')) if approver.get('username') else None
+    if not person or not person.active or person.username == employee_id:
+        raise ValueError('请管理员先配置有效且不是申请人本人的审批账号')
 
 
 def create(session, employee_id, resource, reason, duration_days, action_id, expected_fields=None):
@@ -33,9 +37,10 @@ def create(session, employee_id, resource, reason, duration_days, action_id, exp
         fields = external.ticket_fields(session, employee_id, resource, reason, duration_days)
         if expected_fields is not None and fields != expected_fields:
             raise ValueError("审批配置已变化，请重新生成确认卡片")
-        pending = session.query(db.Ticket).filter_by(employee_id=employee_id, resource=resource, status="pending_approval").first()
+        pending = session.query(db.Ticket).filter_by(employee_id=employee_id, resource=resource).filter(
+            db.Ticket.status.in_(('pending_approval', 'approved', 'fulfilling', 'delivery_failed', 'delivered'))).first()
         if pending:
-            raise ValueError(f"该资源已有待审批工单 {pending.ticket_id}，请勿重复申请")
+            raise ValueError(f"该资源已有未完成工单 {pending.ticket_id}，请勿重复申请")
         ap = (external.all_config(session).get("resource_approvers") or {}).get(resource) or {}
         t = db.Ticket(ticket_id="IT-" + uuid.uuid4().hex[:20], employee_id=employee_id,
             resource=resource, reason=reason.strip(), duration_days=duration_days,
@@ -56,15 +61,25 @@ def create(session, employee_id, resource, reason, duration_days, action_id, exp
 
 
 def list_for(p):
+    from .enterprise import Delivery
     with db.get_session() as session:
         q = session.query(db.Ticket)
         if p.role != "admin":
-            q = q.filter((db.Ticket.employee_id == p.username) | (db.Ticket.approver == p.username))
+            assigned = session.query(Delivery.ticket_id).filter(Delivery.executor == p.username)
+            q = q.filter((db.Ticket.employee_id == p.username) | (db.Ticket.approver == p.username) | db.Ticket.ticket_id.in_(assigned))
+        deliveries = {d.ticket_id: d for d in session.query(Delivery).filter(Delivery.ticket_id.in_(q.with_entities(db.Ticket.ticket_id))).all()}
         return [{"ticket_id": t.ticket_id, "employee_id": t.employee_id, "resource": t.resource,
             "reason": t.reason, "status": t.status, "approver": t.approver,
             "submitted_on": str(t.submitted_on), "duration_days": t.duration_days,
             "can_cancel": t.employee_id == p.username and t.status == "pending_approval",
-            "can_decide": t.approver == p.username and t.employee_id != p.username and t.status == "pending_approval"}
+            "can_decide": t.approver == p.username and t.employee_id != p.username and t.status == "pending_approval",
+            "executor": deliveries[t.ticket_id].executor if t.ticket_id in deliveries else None,
+            "delivery_revision": deliveries[t.ticket_id].revision if t.ticket_id in deliveries else 0,
+            "delivery_reference": deliveries[t.ticket_id].reference if t.ticket_id in deliveries else '',
+            "delivery_note": deliveries[t.ticket_id].note if t.ticket_id in deliveries else '',
+            "can_assign": (p.role == 'admin' or t.approver == p.username) and t.status in ('approved', 'fulfilling', 'delivery_failed'),
+            "can_deliver": t.ticket_id in deliveries and deliveries[t.ticket_id].executor == p.username and t.employee_id != p.username and t.status == 'fulfilling',
+            "can_accept": t.employee_id == p.username and t.status == 'delivered'}
             for t in q.order_by(db.Ticket.id.desc()).limit(100)]
 
 

@@ -21,6 +21,7 @@ RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ \
 COPY ramp/ ./ramp/
 COPY seed/ ./seed/
 COPY scripts/ ./scripts/
+COPY tests/ ./tests/
 
 EXPOSE 8000
 

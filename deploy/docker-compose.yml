@@ -78,6 +78,8 @@ services:
       RAMP_DAILY_ASK_LIMIT: "50"
       RAMP_MAX_CONCURRENT: "3"
       RAMP_RELEASE: ${RAMP_RELEASE:-local}
+      RAMP_DATA_INGEST_TOKEN_SHA256: ${RAMP_DATA_INGEST_TOKEN_SHA256:-}
+      RAMP_DATA_INGEST_FIELDS: ${RAMP_DATA_INGEST_FIELDS:-probation,leave_balance,social_insurance,housing_fund,onboarding_docs}
       # 线上不接 LangSmith：多一个外部依赖就多一个启动失败的可能，
       # 而且演示环境的 trace 没人看。要开就填 key 再重启。
       LANGSMITH_API_KEY: ""

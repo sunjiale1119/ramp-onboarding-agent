@@ -2,15 +2,44 @@
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>爬坡 Ramp · 工单与试用</title><link rel="stylesheet" href="/_shared.css">
 <style>
-.work {max-width:1000px;margin:auto}.work section{margin:24px 0;padding:24px;background:var(--card);border:1px solid var(--rule)}
+.work {max-width:1000px;margin:auto}.work section{margin:24px 0;padding:24px;background:var(--app);border:1px solid var(--rule)}
 .work h2,.work h3{margin:0 0 16px}.work label{display:block;margin-top:12px}.work textarea{width:100%;min-height:90px;box-sizing:border-box}
 .work input,.work select,.work textarea{font:inherit;max-width:100%}.work article{padding:16px 0;border-bottom:1px solid var(--rule);overflow-wrap:anywhere}
 .work p{white-space:pre-wrap}.actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.work button{min-height:40px}.work pre{white-space:pre-wrap;overflow-wrap:anywhere}
 @media(max-width:600px){.work section{padding:16px}.work{font-size:16px}}
+.enterprise-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 24px}.enterprise-grid>*{min-width:0}.enterprise-grid input,.enterprise-grid select{width:100%;min-height:44px;font-size:16px}.enterprise-wide{grid-column:1/-1}.enterprise-check{display:flex!important;gap:10px;align-items:start}.enterprise-check input{width:auto;min-height:24px}.enterprise-help{color:var(--ink2)}.work [role="status"]{overflow-wrap:anywhere}.work button{min-height:44px}.work a{color:var(--acc2);text-underline-offset:3px}
+@media(max-width:600px){.enterprise-grid{grid-template-columns:minmax(0,1fr)}.enterprise-wide{grid-column:auto}}
 </style></head><body><main class="page work">
 <h2>工单与团队试用</h2><p>这里记录实际操作和试用反馈。工单审批仅在本项目内流转，不直接开通企业权限。</p>
 <div class="actions"><button class="btn" id="refresh">刷新结果</button><span id="notice" role="status"></span></div>
+<section id="service-setup" hidden><h3>企业服务配置</h3><p>先激活成员，再建立服务目录、岗位范围和审批人。这里管理本企业的记录，不代表已连接企业 IT 系统。</p><p id="integration-state" role="status"></p>
+<form id="catalog-form" class="enterprise-grid">
+<div><label for="catalog-kind">配置类别</label><select id="catalog-kind"><option value="entitlement_catalog">可申请资源目录</option><option value="doc_catalog">入职材料目录</option><option value="role_entitlements">岗位应有权限</option></select></div>
+<div><label for="catalog-key">资源标识 / 材料标识 / 岗位名称</label><input id="catalog-key" maxlength="64" required aria-describedby="catalog-hint"></div>
+<div class="enterprise-wide" id="catalog-label-wrap"><label for="catalog-label">显示名称</label><input id="catalog-label" maxlength="200" required></div>
+<div class="enterprise-wide" id="catalog-options" hidden></div>
+<p class="enterprise-wide enterprise-help" id="catalog-hint">资源标识如 vpn；更新同名条目会保留标识。岗位名称对应成员设置中的岗位，其他岗位可填 *。</p>
+<div class="actions enterprise-wide"><button class="btn pri" type="submit">保存条目</button><span id="catalog-status" role="status"></span></div>
+</form><div id="catalog-items"></div><p><a href="/admin">前往管理后台分配审批人、联系人及成员角色</a></p></section>
+<section id="business-records" hidden><h3>带来源的业务记录</h3><p>HR 维护个人事项，管理员维护权限快照。记录会提供给本人查询，不会自动从演示规则推算；旧版无来源数据仍保留，但需重新核实。</p>
+<form id="record-form" class="enterprise-grid">
+<div><label for="record-employee">员工账号</label><select id="record-employee" required></select></div>
+<div><label for="record-field">需要确认的事项</label><select id="record-field"><option value="probation">合同约定的试用期结束日</option><option value="leave_balance">核定年假额度与已休天数</option><option value="social_insurance">社保办理状态</option><option value="housing_fund">公积金办理状态</option><option value="onboarding_docs">已提交入职材料</option><option value="entitlements">已开通权限快照（管理员）</option></select></div>
+<div id="record-values" class="enterprise-wide enterprise-grid"></div>
+<div><label for="record-asof">来源数据截至日期</label><input id="record-asof" type="date" required></div>
+<div><label for="record-until">此记录有效至</label><input id="record-until" type="date" required aria-describedby="record-date-help"></div>
+<p class="enterprise-wide enterprise-help" id="record-date-help">记录有效期最多为快照日后90天。超过有效期或主动撤销后，Agent 会提示重新核实，不回退到旧版本。</p>
+<div class="enterprise-wide"><label for="record-source">来源编号 / 核验凭据（不要填密码或证件号码）</label><input id="record-source" maxlength="240" required></div>
+<label class="enterprise-wide enterprise-check"><input id="record-confirm" type="checkbox" required>我已核对来源、日期与员工身份，并有权记录这些信息。</label>
+<div class="actions enterprise-wide"><button class="btn pri" type="submit">确认并保存新版本</button><button class="btn" id="record-revoke" type="button">撤销当前记录</button><span id="record-status" role="status"></span></div>
+</form><div id="record-current"></div></section>
 <section><h3>我的申请与待我审批</h3><p>申请人可以取消待审批申请；只有指定审批人可以批准或驳回，不能自审。</p><div id="tickets">正在加载…</div></section>
+<section id="delivery-panel" hidden><h3>登记工单执行与验收</h3><p>批准不等于开通。审批人或管理员指派 IT 执行人；执行人在真实业务系统办理后，登记凭证，再由申请人验收。此处不会自动连接或操作外部系统。</p>
+<form id="delivery-form" class="enterprise-grid"><div><label for="delivery-ticket">工单</label><select id="delivery-ticket" required></select></div><div><label for="delivery-action">操作</label><select id="delivery-action" required></select></div>
+<div id="executor-wrap"><label for="delivery-executor">IT 执行人</label><select id="delivery-executor"></select></div>
+<div id="reference-wrap"><label for="delivery-reference">实际工单号 / 执行凭证编号</label><input id="delivery-reference" maxlength="500"></div>
+<div class="enterprise-wide"><label for="delivery-note">处理说明 / 未完成原因</label><input id="delivery-note" maxlength="1000" required></div>
+<div class="actions enterprise-wide"><button class="btn pri" type="submit">保存处理记录</button><span id="delivery-status" role="status"></span></div></form></section>
 <section id="requests-section" hidden><h3>我的操作记录</h3><p>网络中断后先查这里。处理中不等于失败，结果不确定也不等于工单未创建。</p><div id="requests"></div></section>
 <section><h3>提交试用反馈</h3><p>反馈会提供给运营人员。请勿填写工资、身份证、客户资料等敏感信息；不会自动附带聊天原文。</p>
 <form id="feedback-form"><label for="category">试用场景</label><select id="category"><option>知识问答</option><option>个人信息</option><option>权限申请</option><option>人工转交</option><option>其他</option></select>
@@ -19,13 +48,14 @@
 <h3 style="margin-top:24px">反馈处理进展</h3><div id="feedback"></div></section>
 <section id="ops-section" hidden><h3>运维与试用数据</h3><div id="metrics"></div><h3 style="margin-top:24px">最近操作审计</h3><div id="audit"></div></section>
 </main><script src="/_shared.js"></script><script>
-let ME=null;
-const statusName={pending_approval:'待审批',approved:'已批准（待真实 IT 开通）',rejected:'已驳回',cancelled:'已取消',running:'处理中 / 中断待核查',uncertain:'结果不确定，请核查',succeeded:'已完成',open:'待处理',resolved:'已处理'};
+let ME=null, TICKETS=[];
+const statusName={pending_approval:'待审批',approved:'已批准 · 待指派执行',fulfilling:'IT 办理中',delivery_failed:'办理失败 · 待重新分配',delivered:'已登记交付 · 待本人验收',closed:'本人已验收 · 已结单',rejected:'已驳回',cancelled:'已取消',running:'处理中 / 中断待核查',uncertain:'结果不确定，请核查',succeeded:'已完成',open:'待处理',resolved:'已处理'};
 async function load(){
   $('#notice').textContent='正在刷新…';
   try{
     const ts=await api('/tickets');
-    $('#tickets').innerHTML=ts.length?ts.map(t=>'<article><strong>'+esc(t.ticket_id)+' · '+esc(statusName[t.status]||t.status)+'</strong><p>资源：'+esc(t.resource)+'\n申请账号：'+esc(t.employee_id)+'\n审批账号：'+esc(t.approver||'未配置，请联系管理员')+'\n理由：'+esc(t.reason)+'</p><div class="actions">'+(t.can_cancel?'<button class="btn" data-ticket="'+esc(t.ticket_id)+'" data-action="cancel">取消申请</button>':'')+(t.can_decide?'<button class="btn" data-ticket="'+esc(t.ticket_id)+'" data-action="approve">批准</button><button class="btn" data-ticket="'+esc(t.ticket_id)+'" data-action="reject">驳回</button>':'')+'</div></article>').join(''):'<p>暂无工单。</p>';
+    TICKETS=ts;renderDelivery();
+    $('#tickets').innerHTML=ts.length?ts.map(t=>'<article><strong>'+esc(t.ticket_id)+' · '+esc(statusName[t.status]||t.status)+'</strong><p>资源：'+esc(t.resource)+'\n申请账号：'+esc(t.employee_id)+'\n审批账号：'+esc(t.approver||'未配置，请联系管理员')+'\n执行账号：'+esc(t.executor||'尚未指派')+'\n交付凭证：'+esc(t.delivery_reference||'尚未登记')+'\n执行说明：'+esc(t.delivery_note||'尚未登记')+'\n理由：'+esc(t.reason)+'</p><div class="actions">'+(t.can_cancel?'<button class="btn" data-ticket="'+esc(t.ticket_id)+'" data-action="cancel">取消申请</button>':'')+(t.can_decide?'<button class="btn" data-ticket="'+esc(t.ticket_id)+'" data-action="approve">批准</button><button class="btn" data-ticket="'+esc(t.ticket_id)+'" data-action="reject">驳回</button>':'')+'</div></article>').join(''):'<p>暂无工单。</p>';
     const fs=await api('/pilot/feedback');
     $('#feedback').innerHTML=fs.length?fs.map(f=>'<article><strong>#'+f.id+' · '+esc(f.category)+' · '+esc(statusName[f.status])+'</strong><p>'+esc(f.content)+'</p><p>处理说明：'+esc(f.resolution||'尚未处理')+'</p>'+((ME.views||[]).includes('ops')?'<button class="btn" data-feedback="'+f.id+'">填写处理结果</button>':'')+'</article>').join(''):'<p>暂无反馈。真实反馈提交后会显示在这里。</p>';
     if(ME.role==='newbie'){
@@ -47,5 +77,112 @@ try{await api('/pilot/feedback',j('POST',{category:$('#category').value,rating:+
 document.addEventListener('click',async function(e){const b=e.target.closest('[data-ticket],[data-feedback]');if(!b||b.disabled)return;
 const note=prompt(b.dataset.ticket?'请填写本次处理说明；这只变更内置工单记录。':'请填写处理结果，提交后反馈标记为已处理。');if(!note||!note.trim())return;b.disabled=true;
 try{if(b.dataset.ticket)await api('/tickets/decision',j('POST',{ticket_id:b.dataset.ticket,action:b.dataset.action,note:note}));else await api('/pilot/feedback/resolve',j('POST',{id:+b.dataset.feedback,status:'resolved',resolution:note}));await load();}catch(x){$('#notice').textContent=x.message;}finally{b.disabled=false;}});
-(async function(){ME=await mount('/workspace');if(ME)load();})();
+let CATALOG=null, RECORDS=[], EXECUTORS=[], recordLoading=false, recordEpoch=0;
+const fieldNames={probation:'试用期结束日',leave_balance:'年假',social_insurance:'社保',housing_fund:'公积金',onboarding_docs:'入职材料',entitlements:'权限快照'};
+function localDate(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function options(rows,valueKey,labelKey){return rows.map(x=>'<option value="'+esc(x[valueKey])+'">'+esc(x[labelKey])+' · '+esc(x[valueKey])+'</option>').join('');}
+async function loadEnterprise(){
+  try{EXECUTORS=await api('/enterprise/executors');renderDelivery();}catch(e){$('#delivery-status').textContent=e.message;}
+  if(!['admin','hr'].includes(ME.role))return;
+  $('#business-records').hidden=false;
+  if(ME.role!=='admin')$('#record-field option[value="entitlements"]').remove();
+  try{
+    CATALOG=await api('/enterprise/catalog');
+    const people=await api('/enterprise/people');$('#record-employee').innerHTML=options(people,'username','name');
+    if(ME.role==='admin'){$('#service-setup').hidden=false;renderCatalog();}
+    await loadRecords();
+  }catch(e){$('#record-status').textContent=e.message;}
+}
+function renderCatalog(){
+  if(!CATALOG)return;
+  $('#integration-state').textContent=CATALOG.ingest_configured?'企业推送凭据已配置（不等于已联通）。以下字段由源系统负责，不能人工覆盖：'+CATALOG.ingest_fields.map(x=>fieldNames[x]||x).join('、'):'企业数据推送尚未配置；可先由负责人登记有来源的业务记录。';
+  const kind=$('#catalog-kind').value, role=kind==='role_entitlements';
+  $('#catalog-label-wrap').hidden=role;$('#catalog-label').required=!role;$('#catalog-options').hidden=!role;
+  $('#catalog-options').innerHTML='<p>此岗位应有的权限</p>'+Object.entries(CATALOG.config.entitlement_catalog||{}).map(([k,v])=>'<label class="enterprise-check"><input type="checkbox" data-catalog-resource="'+esc(k)+'">'+esc(v)+'</label>').join('');
+  $('#catalog-items').innerHTML=Object.entries(CATALOG.config[kind]||{}).map(([k,v])=>'<article><strong>'+esc(k)+'</strong><p>'+esc(Array.isArray(v)?v.join('、'):v)+'</p><button class="btn" data-catalog-edit="'+esc(k)+'">编辑条目</button><button class="btn" data-catalog-delete="'+esc(k)+'">删除条目</button></article>').join('')||'<p>暂无条目，请填写上方表单建立第一项；无需装载演示账号。</p>';
+}
+$('#catalog-kind').onchange=function(){$('#catalog-key').value='';$('#catalog-label').value='';renderCatalog();};
+async function saveCatalog(value){
+  await api('/enterprise/catalog',j('POST',{key:$('#catalog-kind').value,value:value,expected_revision:CATALOG.revision}));
+  CATALOG=await api('/enterprise/catalog');renderCatalog();$('#catalog-status').textContent='已保存，其他管理员的旧页面不能覆盖本次变更';
+}
+$('#catalog-form').onsubmit=async function(e){e.preventDefault();const b=this.querySelector('button');if(b.disabled||!CATALOG)return;b.disabled=true;
+  try{const kind=$('#catalog-kind').value,key=$('#catalog-key').value.trim();if(!key)throw new Error('请填写标识或岗位名称');
+    const value={...CATALOG.config[kind]};value[key]=kind==='role_entitlements'?$$('[data-catalog-resource]:checked').map(x=>x.dataset.catalogResource):$('#catalog-label').value.trim();
+    await saveCatalog(value);
+  }catch(x){$('#catalog-status').textContent=x.message;CATALOG=await api('/enterprise/catalog').catch(()=>CATALOG);}finally{b.disabled=false;}
+};
+$('#catalog-items').onclick=async function(e){const b=e.target.closest('[data-catalog-edit],[data-catalog-delete]');if(!b||b.disabled)return;
+  const key=b.dataset.catalogEdit||b.dataset.catalogDelete,kind=$('#catalog-kind').value;
+  if(b.dataset.catalogEdit!==undefined){$('#catalog-key').value=key;const value=CATALOG.config[kind][key];if(Array.isArray(value))$$('[data-catalog-resource]').forEach(x=>x.checked=value.includes(x.dataset.catalogResource));else $('#catalog-label').value=value;$('#catalog-key').focus();return;}
+  if(!confirm('删除条目 '+key+'？被岗位、审批或未结工单引用的资源不能删除。'))return;b.disabled=true;
+  try{const value={...CATALOG.config[kind]};delete value[key];await saveCatalog(value);}catch(x){$('#catalog-status').textContent=x.message;}finally{b.disabled=false;}
+};
+function currentRecord(){return RECORDS.find(x=>x.field===$('#record-field').value);}
+async function loadRecords(){
+  const epoch=++recordEpoch;recordLoading=true;RECORDS=[];$('#record-status').textContent='正在读取员工记录…';
+  try{const employee=$('#record-employee').value;if(!employee){$('#record-status').textContent='没有已激活成员，请管理员先激活账号';return;}
+    const records=await api('/enterprise/records/'+encodeURIComponent(employee));if(epoch!==recordEpoch)return;RECORDS=records;renderRecord();$('#record-status').textContent='已读取；请核对后保存';
+  }catch(x){if(epoch===recordEpoch)$('#record-status').textContent=x.message;}finally{if(epoch===recordEpoch)recordLoading=false;}
+}
+$('#record-employee').onchange=loadRecords;$('#record-field').onchange=renderRecord;
+function renderRecord(){
+  if(!CATALOG)return;
+  const managed=CATALOG.ingest_configured&&CATALOG.ingest_fields.includes($('#record-field').value);
+  $('#record-form button[type="submit"]').disabled=managed;$('#record-revoke').disabled=managed;
+  const field=$('#record-field').value,r=currentRecord(),v=(r&&!r.revoked?r.value:{});
+  function input(id,label,type,value){return '<div><label for="'+id+'">'+label+'</label><input id="'+id+'" type="'+type+'" value="'+esc(value??'')+'" '+(type==='number'?'min="0" max="10000000" step="0.5"':'')+'></div>';}
+  let h='';
+  if(field==='probation')h=input('value-end','合同约定结束日（不等于实际转正）','date',v.probation_end);
+  if(field==='leave_balance')h=input('value-total','HR核定总天数','number',v.total)+input('value-used','截至快照日已休天数','number',v.used);
+  if(['social_insurance','housing_fund'].includes(field)){
+    h='<div><label for="value-status">办理状态</label><select id="value-status">'+[['unknown','尚未确认'],['paid','来源确认已缴纳'],['pending','来源确认办理中'],['not_started','来源确认未开始']].map(([k,l])=>'<option value="'+k+'"'+(v.status===k?' selected':'')+'>'+l+'</option>').join('')+'</select></div>';
+    h+=field==='social_insurance'?input('value-from','实际起缴日期（可留空）','date',v.actual_from):input('value-base','缴存基数（可留空）','number',v.base);
+  }
+  if(['onboarding_docs','entitlements'].includes(field)){
+    const name=field==='entitlements'?'granted':'submitted',cat=CATALOG.config[field==='entitlements'?'entitlement_catalog':'doc_catalog']||{};
+    h='<div class="enterprise-wide"><p>勾选已核实的项目；空清单表示负责人明确确认没有，不代表未知。</p>'+Object.entries(cat).map(([k,l])=>'<label class="enterprise-check"><input type="checkbox" data-record-item="'+esc(k)+'"'+((v[name]||[]).includes(k)?' checked':'')+'>'+esc(l)+'</label>').join('')+'</div>';
+  }
+  $('#record-values').innerHTML=h;
+  const today=new Date(),until=new Date();until.setDate(until.getDate()+7);
+  $('#record-asof').value=r?r.as_of:localDate(today);$('#record-until').value=r?r.valid_until:localDate(until);$('#record-source').value=r?r.source_ref:'';$('#record-confirm').checked=false;
+  $('#record-current').innerHTML=r?'<p>当前版本 v'+r.revision+' · '+(r.revoked?'已撤销':r.usable?'有效期内':'已过期')+' · 来源方式：'+esc(r.source_kind==='integration'?'企业接口推送':'负责人确认')+' · 记录人：'+esc(r.actor)+'</p><p>来源：'+esc(r.source_ref)+'；数据截至 '+esc(r.as_of)+'，有效至 '+esc(r.valid_until)+'</p>':'<p>没有可用记录。不会从旧版演示数据自动确认。</p>';
+}
+function recordPayload(revoked){
+  const field=$('#record-field').value,r=currentRecord();let value={};
+  if(!revoked){
+    if(field==='probation')value={probation_end:$('#value-end').value};
+    if(field==='leave_balance'){
+      if($('#value-total').value===''||$('#value-used').value==='')throw new Error('请填写核定额度和已休天数，不能把未填写当成零');
+      value={total:Number($('#value-total').value),used:Number($('#value-used').value)};
+    }
+    if(field==='social_insurance'){value={status:$('#value-status').value};if($('#value-from').value)value.actual_from=$('#value-from').value;}
+    if(field==='housing_fund'){value={status:$('#value-status').value};if($('#value-base').value!=='')value.base=Number($('#value-base').value);}
+    if(['onboarding_docs','entitlements'].includes(field))value[field==='entitlements'?'granted':'submitted']=$$('[data-record-item]:checked').map(x=>x.dataset.recordItem);
+  }
+  return {employee_id:$('#record-employee').value,field,value,as_of:$('#record-asof').value,valid_until:$('#record-until').value,source_ref:$('#record-source').value.trim(),expected_revision:r?r.revision:0,revoked};
+}
+$('#record-form').onsubmit=async function(e){e.preventDefault();const b=this.querySelector('button');if(recordLoading||b.disabled)return;b.disabled=true;
+  try{await api('/enterprise/records',j('POST',recordPayload(false)));await loadRecords();$('#record-status').textContent='新版本已保存，可由本人查询；未自动执行任何企业操作';}catch(x){$('#record-status').textContent=x.message;}finally{b.disabled=false;}
+};
+$('#record-revoke').onclick=async function(){if(recordLoading||this.disabled)return;if(!currentRecord()){$('#record-status').textContent='没有可撤销记录';return;}if(!confirm('撤销当前记录？Agent 将停止使用，历史版本保留且不会自动恢复。'))return;this.disabled=true;
+  try{await api('/enterprise/records',j('POST',recordPayload(true)));await loadRecords();$('#record-status').textContent='已撤销，历史保留';}catch(x){$('#record-status').textContent=x.message;}finally{this.disabled=false;}
+};
+function renderDelivery(){
+  const eligible=TICKETS.filter(t=>t.can_assign||t.can_deliver||t.can_accept),selected=$('#delivery-ticket').value;
+  $('#delivery-panel').hidden=!eligible.length;
+  $('#delivery-ticket').innerHTML=eligible.map(t=>'<option value="'+esc(t.ticket_id)+'">'+esc(t.ticket_id)+' · '+esc(statusName[t.status])+'</option>').join('');
+  if(eligible.some(t=>t.ticket_id===selected))$('#delivery-ticket').value=selected;
+  $('#delivery-executor').innerHTML=options(EXECUTORS,'username','name');deliveryActions();
+}
+function deliveryActions(){const t=TICKETS.find(x=>x.ticket_id===$('#delivery-ticket').value);if(!t)return;
+  const actions=[];if(t.can_assign)actions.push(['assign','指定 / 更换 IT 执行人']);if(t.can_deliver)actions.push(['complete','已在实际系统办理，登记交付'],['fail','办理失败，说明原因']);if(t.can_accept)actions.push(['accept','本人验收通过，结单'],['reopen','未达到要求，退回执行']);
+  $('#delivery-action').innerHTML=actions.map(([v,l])=>'<option value="'+v+'">'+l+'</option>').join('');deliveryFields();
+}
+function deliveryFields(){const action=$('#delivery-action').value;$('#executor-wrap').hidden=action!=='assign';$('#reference-wrap').hidden=action!=='complete';$('#delivery-reference').required=action==='complete';}
+$('#delivery-ticket').onchange=deliveryActions;$('#delivery-action').onchange=deliveryFields;
+$('#delivery-form').onsubmit=async function(e){e.preventDefault();const b=this.querySelector('button');if(b.disabled)return;b.disabled=true;
+  try{const t=TICKETS.find(x=>x.ticket_id===$('#delivery-ticket').value);await api('/enterprise/delivery',j('POST',{ticket_id:t.ticket_id,action:$('#delivery-action').value,executor:$('#delivery-executor').value,reference:$('#delivery-reference').value,note:$('#delivery-note').value,expected_revision:t.delivery_revision}));$('#delivery-status').textContent='处理记录已保存';$('#delivery-note').value='';await load();}catch(x){$('#delivery-status').textContent=x.message;}finally{b.disabled=false;}
+};
+(async function(){ME=await mount('/workspace');if(ME){load();loadEnterprise();}})();
 </script></body></html>
