@@ -15,9 +15,9 @@
 2. 上传 `deploy/backup.sh`、`deploy/verify-backup.sh`、`deploy/prepare-release.sh` 后，先运行 `bash /opt/ramp/deploy/prepare-release.sh`。该脚本保存旧镜像标签、代码配置包、审核报告与数据库，随后把备份恢复到随机隔离数据库检验，最后只删除该临时库。输出必须成功才可继续。
 3. 将发布归档解压到 `/opt/ramp`。部署文件 `.env` 不在归档内，不覆盖。既有审核文件保存在 `/opt/ramp/runtime/reports`，应用通过挂载读取。
 4. 如仍使用数据库 root，运营人员用 root 配置单次运行 `scripts/provision_db_user.py`，将随机数据库账号保存到部署 `.env`。应用只获得 ramp 库读写与迁移必需权限，无全局管理、授权或 DROP 权限。不要输出 `.env` 或完整 Compose 展开配置。
-5. 在 `/opt/ramp/deploy`，用提交 SHA 设置 `RAMP_RELEASE`，用唯一标签设置 `RAMP_IMAGE`；执行 `docker compose config --quiet` 和 `docker compose build app`。
+5. 在 `/opt/ramp/deploy`，用提交 SHA 设置 `RAMP_RELEASE`，用唯一标签设置 `RAMP_IMAGE`；执行 `docker compose config --quiet` 和 `docker compose build app`。构建后用 `scripts/set_release.py` 将完整 SHA 和对应镜像标签原子写入部署 `.env`，防止下次 Compose 操作误用旧的 latest 镜像；该脚本不打印其他环境变量。
 6. 用相同环境执行 `docker compose run --rm --no-deps app python -m ramp.migrate_knowledge`，再 `docker compose up -d --no-deps app`。不执行 compose down、不删除卷、不重置账号、不装载演示人员。启动会重复执行安全的增量迁移。
-7. 检查容器健康、公开存活/就绪、未登录访问受限接口、登录后的版本号以及原网站仍正常。保存实际发布 SHA、备份路径和结果。
+7. 检查容器健康、公开存活/就绪、未登录访问受限接口、登录后的版本号以及原网站仍正常。可在应用容器运行 `python -m scripts.verify_release`，使用运营人员提供的管理员凭据验证；默认值仅适用于已有演示账号，不会修改密码。保存实际发布 SHA、备份路径和结果。
 
 依赖以 `uv.lock` 导出的 `deploy/requirements.txt` 固定，升级应重新导出并回归。GitHub Actions 会运行不依赖真实数据库/模型的测试，但没有自动云端部署密钥。
 
